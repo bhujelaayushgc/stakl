@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -74,6 +75,45 @@ func TestConfigSaveRejectsStaleRevision(t *testing.T) {
 	actual, _ := os.ReadFile(path)
 	if !bytes.Equal(actual, changed) {
 		t.Fatal("overwrote external changes")
+	}
+}
+
+func TestConfigSaveRestoresFileWhenReloadIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	original := []byte(config.Sample)
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.DB.Close()
+	s := Server{Manager: manager.New(c, path, dir, db)}
+	changed := strings.Replace(string(original), "port: 49152", "port: 49153", 1)
+	body, err := json.Marshal(map[string]string{"yaml": changed, "revision": fmt.Sprintf("%x", sha256.Sum256(original))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	s.save(w, httptest.NewRequest(http.MethodPost, "/api/config/save", bytes.NewReader(body)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	actual, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(actual, original) {
+		t.Fatal("rejected configuration was left on disk")
+	}
+	if s.Manager.Error() != "" {
+		t.Fatalf("restored configuration remained in error: %s", s.Manager.Error())
 	}
 }
 

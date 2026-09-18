@@ -199,11 +199,18 @@ Usage: localdesk [--config PATH] [--port PORT] [--no-browser]
 	m := manager.New(c, path, dir, db)
 	m.Notify = api.Notify
 	s := &api.Server{Manager: m, Token: token, Address: clientAddress, BindHost: c.Server.Host, Version: version, Started: time.Now(), Assets: web.Assets()}
-	server := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	server := &http.Server{
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+		BaseContext:       func(net.Listener) context.Context { return serverCtx },
+	}
+	serverErr := make(chan error, 1)
 	go func() {
-		if e := server.Serve(listener); e != nil && !errors.Is(e, http.ErrServerClosed) {
-			log.Printf("HTTP server: %v", e)
-		}
+		serverErr <- server.Serve(listener)
 	}()
 	m.StartWorkers()
 	watchCtx, watchCancel := context.WithCancel(context.Background())
@@ -217,11 +224,23 @@ Usage: localdesk [--config PATH] [--port PORT] [--no-browser]
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
+	var serveErr error
+	select {
+	case <-sig:
+	case serveErr = <-serverErr:
+	}
 	signal.Stop(sig)
 	watchCancel()
-	_ = server.Close()
+	serverCancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if e := server.Shutdown(shutdownCtx); e != nil {
+		_ = server.Close()
+	}
+	shutdownCancel()
 	m.Close()
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		return fmt.Errorf("HTTP server: %w", serveErr)
+	}
 	return nil
 }
 func existing(dir string) (instance, bool) {

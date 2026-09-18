@@ -238,7 +238,7 @@ func ComposeCommand(a config.App, args ...string) config.Command {
 func (c *Compose) Start(ctx context.Context, a config.App) (Runtime, error) {
 	_, e := Run(ctx, a, ComposeCommand(a, "up", "-d"))
 	if e != nil {
-		return Runtime{}, fmt.Errorf("Docker Compose could not start; check Docker installation and daemon. %w", e)
+		return Runtime{}, fmt.Errorf("docker compose could not start; check Docker installation and daemon: %w", e)
 	}
 	return Runtime{Owned: true, Started: time.Now().UTC(), State: "running"}, nil
 }

@@ -8,16 +8,28 @@ LocalDesk manages development servers, scripts, background workers, local tools,
 
 *Screenshot from the browser integration test. The listed applications are real disposable processes.*
 
+## Install
+
+Tagged releases contain standalone macOS and Linux binaries for arm64 and amd64. Download the archive for your platform and `checksums.txt` from GitHub Releases, verify the archive, then extract it:
+
+```sh
+grep 'localdesk-darwin-arm64.tar.gz$' checksums.txt | shasum -a 256 -c -
+tar -xzf localdesk-darwin-arm64.tar.gz
+./localdesk-darwin-arm64
+```
+
+Linux users can replace `shasum -a 256` with `sha256sum`. Release binaries are not currently code-signed; macOS may require approval in **System Settings → Privacy & Security**. The first launch creates `~/.localdesk/config.yml`, starts the controller at `http://127.0.0.1:49152`, and opens an authenticated browser session.
+
 ## Build and run
 
-Requires Go 1.23+ and Node.js 22+ **to build**. The resulting executable needs neither Node.js nor Go. Docker is optional.
+Requires Go 1.26+ and Node.js 22+ **to build**. The resulting executable needs neither Node.js nor Go. Docker is optional.
 
 ```sh
 make build
 ./bin/localdesk
 ```
 
-The first launch creates `~/.localdesk/config.yml`, starts the controller at `http://127.0.0.1:49152`, and opens an authenticated browser session. The initial workspace is empty. Use **Discover apps** to scan a project directory and review suggested commands, or edit YAML directly.
+The initial workspace is empty. Use **Discover apps** to scan a project directory and review suggested commands, or edit YAML directly.
 
 Optionally copy `bin/localdesk` to a directory on your `PATH`. No installation script, OS service registration, cloud account, or telemetry is required. Running it again opens the existing dashboard.
 
@@ -131,7 +143,9 @@ make browser-test   # isolated desktop/mobile browser regression tests
 make dist           # four CGO-free binaries
 ```
 
-The development frontend is at `http://127.0.0.1:5173`; its proxy reads the development controller token. Keep Vite bound to localhost. `make dev` discovers the address configured in `.dev/config.yml`. Frontend dependencies use an npm lockfile. Go dependencies use `go.sum`. GitHub Actions tests on macOS/Linux and produces macOS/Linux arm64/amd64 artifacts without publishing releases.
+The development frontend is at `http://127.0.0.1:5173`; its proxy reads the development controller token. Keep Vite bound to localhost. `make dev` discovers the address configured in `.dev/config.yml`. Frontend dependencies use an npm lockfile. Go dependencies use `go.sum`. GitHub Actions tests on macOS/Linux and publishes checksummed macOS/Linux arm64/amd64 archives for `v*` tags.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before sending changes and [SECURITY.md](SECURITY.md) for private vulnerability reporting. LocalDesk is available under the [MIT License](LICENSE).
 
 ## Persistence and operating limits
 

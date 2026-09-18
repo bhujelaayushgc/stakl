@@ -70,7 +70,7 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		if action == "stop" && r.URL.Query().Get("confirm") != "true" {
-			errorJSON(w, fmt.Errorf("Stop All requires confirm=true"), 400)
+			errorJSON(w, fmt.Errorf("stop all requires confirm=true"), 400)
 			return
 		}
 		JSON(w, s.Manager.Operate(r.Context(), action, s.Manager.GlobalIDs(action == "restart"), false))
@@ -111,7 +111,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		if r.URL.Path == "/" && r.URL.Query().Get("token") != "" {
 			if !s.valid(r.URL.Query().Get("token")) {
-				http.Error(w, "Invalid dashboard token", 401)
+				http.Error(w, "Invalid dashboard token", http.StatusUnauthorized)
 				return
 			}
 			http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Value: s.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
@@ -253,6 +253,16 @@ func (s *Server) save(w http.ResponseWriter, r *http.Request) {
 	}
 	if e == nil {
 		e = s.Manager.Reload()
+		if e != nil {
+			reloadErr := e
+			if restoreErr := supervisor.AtomicWrite(s.Manager.ConfigPath, old); restoreErr != nil {
+				e = fmt.Errorf("%v; restoring previous configuration: %w", reloadErr, restoreErr)
+			} else if restoreErr = s.Manager.Reload(); restoreErr != nil {
+				e = fmt.Errorf("%v; reloading restored configuration: %w", reloadErr, restoreErr)
+			} else {
+				e = reloadErr
+			}
+		}
 	}
 	if e != nil {
 		errorJSON(w, e, 400)
@@ -367,7 +377,7 @@ func (s *Server) frontend(w http.ResponseWriter, r *http.Request) {
 	}
 	b, e := fs.ReadFile(s.Assets, path)
 	if e != nil {
-		http.Error(w, "Frontend not built. Run make frontend and rebuild.", 503)
+		http.Error(w, "Frontend not built. Run make frontend and rebuild.", http.StatusServiceUnavailable)
 		return
 	}
 	switch filepath.Ext(path) {

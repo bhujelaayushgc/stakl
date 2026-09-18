@@ -311,7 +311,10 @@ func Run(path string) error {
 	}
 	defer os.Remove(s.Socket)
 	defer listener.Close()
-	os.Chmod(s.Socket, 0600)
+	if e = os.Chmod(s.Socket, 0600); e != nil {
+		finish(e)
+		return e
+	}
 	if e = cmd.Start(); e != nil {
 		lw.write("stderr", e.Error())
 		finish(e)
@@ -358,7 +361,7 @@ func Run(path string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.Token)) != 1 {
-			http.Error(w, "unauthorized", 401)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if r.URL.Path == "/stop" {
