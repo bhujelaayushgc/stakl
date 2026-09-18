@@ -1,0 +1,14 @@
+/bin/
+/dist/
+/web/node_modules/
+/web/dist/
+/web/*.tsbuildinfo
+/.dev/
+/.impeccable/
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+
+/web/test-results/
+/web/playwright-report/
