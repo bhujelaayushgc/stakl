@@ -1,0 +1,3 @@
+# LocalDesk design
+
+Operate mode. Developer control panel with a quiet charcoal navigation rail, warm neutral work surface, compact bordered rows, emerald primary action, semantic text-and-dot statuses and tabular runtime data. System sans for navigation and body; monospace only for commands, PIDs, ports and logs. Dark mode uses graphite surfaces; light mode uses off-white. Sidebar collapses on small screens; application details retain full-width readable logs. Profiles sit above organizational groups. Clear empty/error/loading states and visible keyboard focus are mandatory. No invented applications or metrics.

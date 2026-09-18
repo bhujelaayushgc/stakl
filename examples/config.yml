@@ -1,0 +1,71 @@
+# A usable workspace with ordinary Unix commands. Nothing starts automatically.
+# Run: localdesk --config ./examples/config.yml
+version: 1
+server:
+  host: 127.0.0.1
+  port: 49152
+  open_browser: true
+
+defaults:
+  stop_timeout: 5s
+  dependency_timeout: 30s
+
+logging:
+  max_size_mb: 25
+  max_files: 5
+  retention_days: 14
+
+groups:
+  examples:
+    name: Examples
+    order: 10
+
+profiles:
+  playground:
+    name: Local playground
+    apps: [heartbeat, dependent]
+
+apps:
+  heartbeat:
+    name: Heartbeat
+    description: A real foreground shell process with live logs
+    group: examples
+    type: shell
+    cwd: .
+    start:
+      command: 'while true; do echo "Heartbeat: $(date)"; sleep 3; done'
+    health:
+      type: process
+      interval: 5s
+    stop:
+      signal: TERM
+      timeout: 3s
+    favorite: true
+    tags: [example, shell]
+    notes: |
+      Safe to start and stop. This runs only date, echo, and sleep.
+      The dependent example waits until this process is healthy.
+
+  dependent:
+    name: Dependent worker
+    description: Demonstrates health-gated dependencies
+    group: examples
+    type: process
+    cwd: .
+    start:
+      command: sleep
+      args: ['3600']
+    depends_on:
+      heartbeat:
+        condition: healthy
+    health:
+      type: process
+
+  exit-demo:
+    name: Exit-code demo
+    description: Prints to both streams and exits successfully
+    group: examples
+    type: shell
+    cwd: .
+    start:
+      command: 'echo "Hello from stdout"; echo "Hello from stderr" >&2; sleep 1; exit 0'
