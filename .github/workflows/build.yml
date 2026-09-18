@@ -1,0 +1,46 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make build test lint
+      - run: python3 scripts/integration.py
+      - run: cd web && npx playwright install --with-deps chromium && npm run test:e2e
+      - if: runner.os == 'Linux'
+        run: python3 scripts/docker-integration.py
+  binaries:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make dist VERSION=${GITHUB_SHA::8}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: localdesk-binaries
+          path: dist/localdesk-*
