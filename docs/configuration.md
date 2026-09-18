@@ -105,7 +105,7 @@ env:
 inherit_env: true
 ```
 
-Env files accept comments, blank lines, optional `export`, and quoted single-line values. They do not execute shell syntax, interpolate other variables, or support multiline values. Later files override earlier files, then `env` overrides both. All environment values are redacted in effective-config API responses. Raw YAML is available only after explicitly revealing the editor, and logs can naturally contain secrets printed by your programs.
+Env files accept comments, blank lines, optional `export`, and quoted single-line values. Variable names cannot be empty or contain whitespace, `=`, or null bytes. Values cannot contain null bytes. Env files do not execute shell syntax, interpolate other variables, or support multiline values. Later files override earlier files, then `env` overrides both. All environment values are redacted in effective-config API responses. Raw YAML is available only after explicitly revealing the editor, and logs can naturally contain secrets printed by your programs.
 
 `process` prefers direct execution. `shell` affects the start command; health/status commands are controlled independently. Command checks are explicitly shell commands. Normal custom apps without `status` are supervised foreground processes; custom apps with `status` are treated as daemonizing command-managed services and require `stop.command`.
 
@@ -179,7 +179,7 @@ lifecycle:
 
 App changes do not restart workloads. Stop an app before removing it from the config. Server host, port or token changes need a controller restart. Autostart is evaluated on controller startup, not on every config reload.
 
-The dashboard's optional editor validates before writing, checks a source revision to reject stale saves, makes a timestamped `.bak` copy, atomically saves, then reloads. A syntactically valid config that changes server settings or removes active apps can save successfully but fail live reload; correct it or restart as instructed. Backup files contain the complete previous config, so protect them like the original.
+The dashboard's optional editor validates before writing, checks a source revision to reject stale saves, makes a timestamped `.bak` copy, atomically saves, then reloads. If live reload rejects a server-setting change or removal of an active app, the editor restores the previous file and reports the error. Backup files contain the complete previous config, so protect them like the original.
 
 ## Files and reset
 

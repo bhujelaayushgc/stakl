@@ -98,7 +98,9 @@ func New(c *config.Config, path, dir string, db *storage.Store) *Manager {
 			t.Runtime.Health = "unknown"
 			t.Runtime.NextRestart = nil
 			t.Runtime.Error = ""
-			m.Store.Launch(spec.ID, spec.App.ID, t.Runtime.Started, t.Runtime)
+			if e := m.Store.Launch(spec.ID, spec.App.ID, t.Runtime.Started, t.Runtime); e != nil {
+				log.Printf("persist recovered launch %s: %v", spec.App.ID, e)
+			}
 			t.Runtime.Launch = ""
 		}
 		if verified && st.Running {
@@ -219,7 +221,9 @@ func (m *Manager) StartWorkers() {
 			case <-ticker.C:
 				m.refreshAll()
 				if time.Since(lastPrune) > time.Minute {
-					m.Store.Prune(m.Config().Logging.RetentionDays)
+					if e := m.Store.Prune(m.Config().Logging.RetentionDays); e != nil {
+						log.Printf("prune history: %v", e)
+					}
 					m.pruneLogs()
 					lastPrune = time.Now()
 				}
@@ -342,7 +346,9 @@ func (m *Manager) refresh(id string) {
 	if running && a.Health.Type != "" && (r.Started.IsZero() || time.Since(r.Started) >= a.Health.InitialDelay.Value()) {
 		v := health.Check(ctx, a.Health, a, r, st.Containers)
 		h = &v
-		m.Store.Check(id, v)
+		if e := m.Store.Check(id, v); e != nil {
+			log.Printf("persist health check %s: %v", id, e)
+		}
 	}
 	ports := map[int]bool{}
 	for _, p := range a.Ports {
@@ -441,7 +447,9 @@ func (m *Manager) refresh(id string) {
 		t.Runtime.State = "failed"
 	}
 	if exited && r.Launch != "" {
-		m.Store.Launch(r.Launch, id, t.Runtime.Started, t.Runtime)
+		if e := m.Store.Launch(r.Launch, id, t.Runtime.Started, t.Runtime); e != nil {
+			log.Printf("persist exited launch %s: %v", id, e)
+		}
 	}
 	next := t.Runtime.NextRestart
 	changed := oldState != t.Runtime.State
@@ -772,7 +780,9 @@ func (m *Manager) stopOne(ctx context.Context, id string, force bool) error {
 		t.Runtime.Error = ""
 	}
 	if e == nil && r.Launch != "" {
-		m.Store.Launch(r.Launch, id, t.Runtime.Started, t.Runtime)
+		if persistErr := m.Store.Launch(r.Launch, id, t.Runtime.Started, t.Runtime); persistErr != nil {
+			log.Printf("persist stopped launch %s: %v", id, persistErr)
+		}
 	}
 	logLaunch := t.LogLaunch
 	if e == nil {
@@ -782,7 +792,9 @@ func (m *Manager) stopOne(ctx context.Context, id string, force bool) error {
 	m.mu.Unlock()
 	if e == nil && logLaunch != "" {
 		if s, _, verified, _ := supervisor.Inspect(m.Dir, logLaunch); verified {
-			supervisor.Query(s, "stop", map[string]bool{"force": true})
+			if _, stopErr := supervisor.Query(s, "stop", map[string]bool{"force": true}); stopErr != nil {
+				log.Printf("stop log follower %s: %v", id, stopErr)
+			}
 		}
 	}
 	if e != nil {

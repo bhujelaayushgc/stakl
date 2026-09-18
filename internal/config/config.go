@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mattn/go-shellwords"
 	"gopkg.in/yaml.v3"
@@ -401,6 +402,14 @@ func Parse(b []byte, base string) (*Config, error) {
 				return nil, fmt.Errorf("%s.env_file: %w", prefix, e)
 			}
 		}
+		for k, v := range a.Env {
+			if !ValidEnvName(k) {
+				return nil, fmt.Errorf("%s.env: invalid variable name %q", prefix, k)
+			}
+			if strings.ContainsRune(v, 0) {
+				return nil, fmt.Errorf("%s.env.%s: value contains a null byte", prefix, k)
+			}
+		}
 		for _, p := range a.Ports {
 			if p.Port < 1 || p.Port > 65535 {
 				return nil, fmt.Errorf("%s.ports: invalid port", prefix)
@@ -522,6 +531,9 @@ func ValidID(s string) bool {
 	}
 	return true
 }
+func ValidEnvName(s string) bool {
+	return s != "" && !strings.ContainsRune(s, '=') && !strings.ContainsRune(s, 0) && !strings.ContainsFunc(s, unicode.IsSpace)
+}
 func (c *Config) IDs() []string {
 	ids := []string{}
 	for id := range c.Apps {
@@ -588,8 +600,13 @@ apps: {}
 `
 
 func Init(path string) error {
-	if _, e := os.Stat(path); e == nil {
+	if st, e := os.Stat(path); e == nil {
+		if st.IsDir() {
+			return fmt.Errorf("configuration path is a directory: %s", path)
+		}
 		return nil
+	} else if !os.IsNotExist(e) {
+		return e
 	}
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return e
@@ -598,9 +615,11 @@ func Init(path string) error {
 	if e != nil {
 		return e
 	}
-	defer f.Close()
-	_, e = f.WriteString(Sample)
-	return e
+	if _, e = f.WriteString(Sample); e != nil {
+		_ = f.Close()
+		return e
+	}
+	return f.Close()
 }
 func Redacted(a App) App {
 	a.Env = clone(a.Env)

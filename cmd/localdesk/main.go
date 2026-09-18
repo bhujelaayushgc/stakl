@@ -162,7 +162,6 @@ Usage: localdesk [--config PATH] [--port PORT] [--no-browser]
 		return e
 	}
 	defer db.DB.Close()
-	os.Chmod(filepath.Join(dir, "state.db"), 0600)
 	logPath := filepath.Join(dir, "internal.log")
 	if st, e := os.Stat(logPath); e == nil && st.Size() > 5*1024*1024 {
 		os.Rename(logPath, logPath+".1")
@@ -402,12 +401,18 @@ func backup(path, dir string) error {
 	if _, e := os.Stat(path); e != nil {
 		return e
 	}
-	target := filepath.Join(dir, "backup-"+time.Now().Format("20060102-150405")+".zip")
+	target := filepath.Join(dir, "backup-"+time.Now().Format("20060102-150405.000000000")+".zip")
 	f, e := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
 	}
-	defer f.Close()
+	complete := false
+	defer func() {
+		if !complete {
+			_ = f.Close()
+			_ = os.Remove(target)
+		}
+	}()
 	z := zip.NewWriter(f)
 	add := func(name, p string) error {
 		b, e := os.ReadFile(p)
@@ -433,7 +438,10 @@ func backup(path, dir string) error {
 		tmp := filepath.Join(dir, "backup-state-"+supervisor.Token()[:12]+".db")
 		defer os.Remove(tmp)
 		_, e = db.DB.Exec("VACUUM INTO ?", tmp)
-		db.DB.Close()
+		closeErr := db.DB.Close()
+		if e == nil {
+			e = closeErr
+		}
 		if e != nil {
 			return e
 		}
@@ -444,6 +452,13 @@ func backup(path, dir string) error {
 	if e = z.Close(); e != nil {
 		return e
 	}
+	if e = f.Sync(); e != nil {
+		return e
+	}
+	if e = f.Close(); e != nil {
+		return e
+	}
+	complete = true
 	fmt.Println(target)
 	return nil
 }

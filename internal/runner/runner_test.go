@@ -3,12 +3,23 @@ package runner
 import (
 	"context"
 	"localdesk/internal/config"
+	"localdesk/internal/supervisor"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "__supervise" {
+		if supervisor.Run(os.Args[2]) != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func TestEnvironmentPrecedenceAndLiteralValues(t *testing.T) {
 	dir := t.TempDir()
@@ -20,6 +31,24 @@ func TestEnvironmentPrecedenceAndLiteralValues(t *testing.T) {
 	}
 	if strings.Join(env, "\n") != "PORT=5678\nTOKEN=literal $PORT" {
 		t.Fatal(env)
+	}
+}
+func TestEnvironmentRejectsInvalidNames(t *testing.T) {
+	inherit := false
+	if _, e := Environment(config.App{Env: map[string]string{"BAD=NAME": "value"}, InheritEnv: &inherit}); e == nil {
+		t.Fatal("accepted an invalid environment variable name")
+	}
+}
+func TestFailedProcessStartDoesNotBlockRetry(t *testing.T) {
+	dir := t.TempDir()
+	p := &Process{Base{Dir: dir, Logging: config.Logging{MaxSizeMB: 1, MaxFiles: 1, RetentionDays: 1}}}
+	a := config.App{ID: "broken", Name: "Broken", Cwd: dir, Start: config.Command{Command: "localdesk-command-that-does-not-exist"}, Stop: config.Stop{Timeout: config.Duration(time.Second)}}
+	r, e := p.Start(context.Background(), a)
+	if e == nil {
+		t.Fatal("missing executable started")
+	}
+	if r.Launch != "" || r.Owned || r.State != "failed" || r.Exited == nil {
+		t.Fatalf("failed launch retained unsafe ownership: %+v", r)
 	}
 }
 func TestCommandsAndTimeout(t *testing.T) {

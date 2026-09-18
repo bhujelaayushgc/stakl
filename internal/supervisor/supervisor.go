@@ -144,6 +144,19 @@ func Launch(dir string, a config.App, c config.Command, env []string, logging co
 		return Spec{}, State{}, fmt.Errorf("unsafe supervisor socket directory %s", socketDir)
 	}
 	s := Spec{BootID: boot, ID: id, Token: Token(), App: a, Command: c, Env: env, Logging: logging, Socket: filepath.Join(socketDir, id+".sock"), LogPath: filepath.Join(dir, "logs", a.ID+"-"+id+".jsonl")}
+	path := ""
+	persistFailure := false
+	fail := func(err error) (Spec, State, error) {
+		now := time.Now().UTC()
+		code := -1
+		st := State{ID: id, Started: now, Exited: &now, ExitCode: &code, Error: err.Error()}
+		if persistFailure {
+			if persistErr := AtomicJSON(path+".exit", st); persistErr != nil {
+				return s, st, fmt.Errorf("%w; persist launch failure: %v", err, persistErr)
+			}
+		}
+		return s, st, err
+	}
 	s.Purpose = "workload"
 	if len(purpose) > 0 {
 		s.Purpose = purpose[0]
@@ -151,29 +164,30 @@ func Launch(dir string, a config.App, c config.Command, env []string, logging co
 	launchDir := filepath.Join(dir, "launches")
 	for _, p := range []string{launchDir, filepath.Join(dir, "logs")} {
 		if e := os.MkdirAll(p, 0700); e != nil {
-			return s, State{}, e
+			return fail(e)
 		}
 	}
-	path := filepath.Join(launchDir, id+".json")
+	path = filepath.Join(launchDir, id+".json")
 	if e := AtomicJSON(path, s); e != nil {
-		return s, State{}, e
+		return fail(e)
 	}
+	persistFailure = true
 	exe, e := os.Executable()
 	if e != nil {
-		return s, State{}, e
+		return fail(e)
 	}
 	cmd := exec.Command(exe, "__supervise", path)
 	Detach(cmd)
 	null, e := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if e != nil {
-		return s, State{}, e
+		return fail(e)
 	}
 	defer null.Close()
 	cmd.Stdin = null
 	cmd.Stdout = null
 	cmd.Stderr = null
 	if e = cmd.Start(); e != nil {
-		return s, State{}, e
+		return fail(e)
 	}
 	go cmd.Wait()
 	deadline := time.Now().Add(10 * time.Second)
@@ -184,8 +198,16 @@ func Launch(dir string, a config.App, c config.Command, env []string, logging co
 		}
 		if b, e := os.ReadFile(path + ".exit"); e == nil {
 			var st State
-			json.Unmarshal(b, &st)
-			return s, st, fmt.Errorf("%s", st.Error)
+			if e = json.Unmarshal(b, &st); e != nil {
+				return s, st, fmt.Errorf("invalid supervisor exit record: %w", e)
+			}
+			if st.ID != s.ID {
+				return s, st, fmt.Errorf("supervisor exit identity mismatch")
+			}
+			if st.Error == "" {
+				st.Error = "workload exited before supervisor became ready"
+			}
+			return s, st, errors.New(st.Error)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}

@@ -10,12 +10,42 @@ import (
 	"localdesk/internal/storage"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+func TestClientIgnoresHTTPProxy(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }))
+	defer proxy.Close()
+	proxyURL, err := url.Parse(proxy.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := http.DefaultTransport.(*http.Transport)
+	originalProxy := transport.Proxy
+	transport.Proxy = http.ProxyURL(proxyURL)
+	defer func() { transport.Proxy = originalProxy }()
+	response, err := Client(t.Context(), target.URL, "secret", http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d; request was intercepted by the proxy", response.StatusCode)
+	}
+}
 
 func TestAuthenticationOriginAndHost(t *testing.T) {
 	dir := t.TempDir()

@@ -570,5 +570,8 @@ func Client(ctx context.Context, address, token, method, path string, body io.Re
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return http.DefaultClient.Do(req)
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DisableKeepAlives = true
+	return (&http.Client{Transport: transport}).Do(req)
 }

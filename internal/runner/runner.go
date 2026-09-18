@@ -94,9 +94,13 @@ func Environment(a config.App) ([]string, error) {
 			if len(v) >= 2 && (v[0] == '\'' && v[len(v)-1] == '\'' || v[0] == '"' && v[len(v)-1] == '"') {
 				v = v[1 : len(v)-1]
 			}
-			if strings.ContainsAny(k, " \t\x00") || k == "" {
+			if !config.ValidEnvName(k) {
 				f.Close()
 				return nil, fmt.Errorf("env file %s: invalid variable name", p)
+			}
+			if strings.ContainsRune(v, 0) {
+				f.Close()
+				return nil, fmt.Errorf("env file %s: variable %s contains a null byte", p, k)
 			}
 			m[k] = v
 		}
@@ -107,6 +111,12 @@ func Environment(a config.App) ([]string, error) {
 		}
 	}
 	for k, v := range a.Env {
+		if !config.ValidEnvName(k) {
+			return nil, fmt.Errorf("invalid environment variable name %q", k)
+		}
+		if strings.ContainsRune(v, 0) {
+			return nil, fmt.Errorf("environment variable %s contains a null byte", k)
+		}
 		m[k] = v
 	}
 	keys := []string{}
@@ -131,6 +141,19 @@ func (p *Process) Start(ctx context.Context, a config.App) (Runtime, error) {
 	}
 	s, st, e := supervisor.Launch(p.Dir, a, command, env, p.Logging)
 	r := Runtime{Launch: s.ID, PID: st.PID, PGID: st.PGID, Owned: true, Started: st.Started, State: "running"}
+	if e != nil {
+		r.Owned = false
+		r.State = "failed"
+		r.Error = e.Error()
+		if st.Exited != nil {
+			r.Launch = ""
+			r.Exited = st.Exited
+			r.ExitCode = st.ExitCode
+			if st.Error != "" {
+				r.Error = st.Error
+			}
+		}
+	}
 	return r, e
 }
 func (p *Process) Stop(ctx context.Context, a config.App, r Runtime, force bool) error {
