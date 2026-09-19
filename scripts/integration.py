@@ -14,7 +14,8 @@ def main():
         ext=http.server.ThreadingHTTPServer(('127.0.0.1',0),http.server.BaseHTTPRequestHandler)
         threading.Thread(target=ext.serve_forever,daemon=True).start()
         worker=d/'worker.py'
-        worker.write_text('''import http.server, os, signal, subprocess, sys, time
+        worker.write_text('''import faulthandler, http.server, os, signal, subprocess, sys, time
+faulthandler.dump_traceback_later(10)
 child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])
 open('child.pid','w').write(str(child.pid))
 print('stdout-ready',flush=True)
@@ -23,7 +24,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   self.send_response(200);self.send_header('Content-Length','2');self.end_headers();self.wfile.write(b'ok')
  def log_message(self,*args): pass
-http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
+server=http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler)
+print('http-ready',flush=True)
+faulthandler.cancel_dump_traceback_later()
+server.serve_forever()
 ''')
         config=d/'config.yml'
         text=f'''version: 1
@@ -182,6 +186,11 @@ apps:
             p.send_signal(signal.SIGTERM);p.wait(timeout=12)
             assert 'preserved' in cli('reset-state','--yes')
             print('PASS: CLI, API/SSE, process tree stop, restart, live logs, dependency health, profiles, external protection, config reload, SQLite recovery, crash-window recovery, controller crash, single instance, autostart, stop-on-exit, restart limits, custom commands, health recovery, backup/reset')
+        except Exception:
+            for endpoint in ['/apps/worker', '/apps/worker/health', '/apps/worker/logs']:
+                try: print(endpoint, json.dumps(api(endpoint)), flush=True)
+                except Exception as error: print(endpoint, str(error), flush=True)
+            raise
         finally:
             try:
                 api('/profiles/stack/stop',{})
