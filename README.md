@@ -10,7 +10,28 @@ LocalDesk manages development servers, scripts, background workers, local tools,
 
 ## Install
 
-Tagged releases contain standalone macOS and Linux binaries for arm64 and amd64. Download the archive for your platform and `checksums.txt` from GitHub Releases, verify the archive, then extract it:
+Tagged releases contain standalone macOS and Linux binaries for arm64 and amd64. Install the latest release without Go, Node.js, or administrator access:
+
+```sh
+curl -fsSL https://github.com/bhujelaayushgc/localdesk/releases/latest/download/install.sh | sh
+```
+
+The installer detects the current platform, downloads the matching archive, verifies its SHA-256 checksum, and installs `localdesk` to `~/.local/bin`. Add that directory to `PATH` if prompted, then run:
+
+```sh
+localdesk
+```
+
+Rerun the installer to upgrade. Pin a version or choose another writable installation directory with environment variables:
+
+```sh
+curl -fsSL https://github.com/bhujelaayushgc/localdesk/releases/latest/download/install.sh | LOCALDESK_VERSION=v0.1.0 sh
+curl -fsSL https://github.com/bhujelaayushgc/localdesk/releases/latest/download/install.sh | LOCALDESK_INSTALL_DIR=/usr/local/bin sh
+```
+
+The installer never starts LocalDesk or changes `~/.localdesk`. To uninstall the executable, remove `~/.local/bin/localdesk`; configuration and runtime history remain intact.
+
+For a manual installation, download the archive for your platform and `checksums.txt` from GitHub Releases, verify the archive, then extract it:
 
 ```sh
 grep 'localdesk-darwin-arm64.tar.gz$' checksums.txt | shasum -a 256 -c -

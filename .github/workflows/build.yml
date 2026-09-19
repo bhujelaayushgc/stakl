@@ -55,6 +55,15 @@ jobs:
           done
           cd dist/release
           sha256sum ./*.tar.gz > checksums.txt
+          cp ../../install.sh .
+      - name: Smoke-test installer
+        run: |
+          install_dir="$(mktemp -d)"
+          python3 -m http.server 48080 --directory dist/release >/tmp/localdesk-installer-http.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true; rm -rf "$install_dir"' EXIT
+          LOCALDESK_RELEASE_URL=http://127.0.0.1:48080 LOCALDESK_INSTALL_DIR="$install_dir" sh ./install.sh
+          "$install_dir/localdesk" --version
       - uses: actions/upload-artifact@v4
         with:
           name: localdesk-binaries
