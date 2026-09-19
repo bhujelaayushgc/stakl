@@ -21,8 +21,9 @@ print('stdout-ready',flush=True)
 print('stderr-ready',file=sys.stderr,flush=True)
 class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
-  self.send_response(200);self.end_headers();self.wfile.write(b'ok')
-http.server.HTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
+  self.send_response(200);self.send_header('Content-Length','2');self.end_headers();self.wfile.write(b'ok')
+ def log_message(self,*args): pass
+http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler).serve_forever()
 ''')
         config=d/'config.yml'
         text=f'''version: 1
