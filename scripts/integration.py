@@ -30,7 +30,7 @@ server:
   port: {port}
   open_browser: false
 defaults:
-  dependency_timeout: 8s
+  dependency_timeout: 20s
 groups:
   test: {{name: Integration}}
 profiles:
