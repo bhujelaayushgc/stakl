@@ -74,7 +74,7 @@ All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations a
 | `links` | Named absolute HTTP(S) URLs |
 | `restart` | Bounded restart policy |
 | `notifications` | Per-app override of global desktop notifications |
-| `lifecycle.stop_on_localdesk_exit` | Stop workload on controller shutdown; default false |
+| `lifecycle.stop_on_stakl_exit` | Stop workload on controller shutdown; default false |
 | `tags`, `icon`, `favorite`, `notes` | Optional metadata; type determines default UI icon |
 
 Browser favorites can override initial `favorite` values locally. `icon` accepts terminal, box, server, activity, layers, code, folder, or heart; unknown/omitted values use the runner type icon. New configuration takes effect for the next launch. Active workloads keep the launch-time cwd, environment, stop settings and runner identity, so a config edit cannot retarget a stop action.
@@ -168,14 +168,14 @@ restart:
   delay: 3s
   backoff: exponential
 lifecycle:
-  stop_on_localdesk_exit: false
+  stop_on_stakl_exit: false
 ```
 
 `never` is the default. `always` includes clean unexpected exits. `on-failure` includes nonzero exits and unexpected disappearance of owned command-managed services. Backoff is fixed unless set to exponential, capped at five minutes. A manual start resets attempts; explicit stop cancels retries. See [process management](process-management.md).
 
 ## Reload and editing
 
-`localdesk config validate` validates without a controller. The running controller checks the YAML file for changes every second, validates the whole document, and atomically switches the active configuration only on success. Invalid changes remain on disk for correction; the dashboard continues with the last valid configuration and displays the error.
+`stakl config validate` validates without a controller. The running controller checks the YAML file for changes every second, validates the whole document, and atomically switches the active configuration only on success. Invalid changes remain on disk for correction; the dashboard continues with the last valid configuration and displays the error.
 
 App changes do not restart workloads. Stop an app before removing it from the config. Server host, port or token changes need a controller restart. Autostart is evaluated on controller startup, not on every config reload.
 
@@ -183,6 +183,6 @@ The dashboard's optional editor validates before writing, checks a source revisi
 
 ## Files and reset
 
-`localdesk backup` writes a private ZIP containing config and a consistent SQLite snapshot. It does not copy projects or log files. Preserve the complete state directory if migrating active launch records on the same machine; a database backup alone does not confer process ownership.
+`stakl backup` writes a private ZIP containing config and a consistent SQLite snapshot. It does not copy projects or log files. Preserve the complete state directory if migrating active launch records on the same machine; a database backup alone does not confer process ownership.
 
-`localdesk reset-state --yes` takes the controller lock and refuses to reset active or unverified launches. It removes only known database/instance files. Configuration, logs, launch records, and project directories remain intact.
+`stakl reset-state --yes` takes the controller lock and refuses to reset active or unverified launches. It removes only known database/instance files. Configuration, logs, launch records, and project directories remain intact.

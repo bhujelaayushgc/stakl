@@ -1,15 +1,15 @@
 #!/bin/sh
 set -eu
 
-repository="bhujelaayushgc/localdesk"
-install_dir=${LOCALDESK_INSTALL_DIR:-"${HOME:?HOME is not set}/.local/bin"}
-version=${LOCALDESK_VERSION:-}
-release_url=${LOCALDESK_RELEASE_URL:-}
+repository="bhujelaayushgc/stakl"
+install_dir=${STAKL_INSTALL_DIR:-"${HOME:?HOME is not set}/.local/bin"}
+version=${STAKL_VERSION:-}
+release_url=${STAKL_RELEASE_URL:-}
 temporary=""
 staged=""
 
 fail() {
-	printf 'LocalDesk installer: %s\n' "$*" >&2
+	printf 'Stakl installer: %s\n' "$*" >&2
 	exit 1
 }
 
@@ -37,7 +37,7 @@ esac
 
 case "$install_dir" in
 	/*) ;;
-	*) fail "LOCALDESK_INSTALL_DIR must be an absolute path" ;;
+	*) fail "STAKL_INSTALL_DIR must be an absolute path" ;;
 esac
 
 if [ -z "$release_url" ]; then
@@ -45,20 +45,20 @@ if [ -z "$release_url" ]; then
 		release_url="https://github.com/$repository/releases/latest/download"
 	else
 		case "$version" in
-			*[!A-Za-z0-9._-]*) fail "invalid LOCALDESK_VERSION: $version" ;;
+			*[!A-Za-z0-9._-]*) fail "invalid STAKL_VERSION: $version" ;;
 		esac
 		case "$version" in
 			v[0-9]*) ;;
 			[0-9]*) version="v$version" ;;
-			*) fail "LOCALDESK_VERSION must be a release such as v0.1.0" ;;
+			*) fail "STAKL_VERSION must be a release such as v0.1.0" ;;
 		esac
 		release_url="https://github.com/$repository/releases/download/$version"
 	fi
 fi
 release_url=${release_url%/}
 
-temporary=$(mktemp -d "${TMPDIR:-/tmp}/localdesk-install.XXXXXX") || fail "could not create a temporary directory"
-archive="localdesk-$os-$arch.tar.gz"
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/stakl-install.XXXXXX") || fail "could not create a temporary directory"
+archive="stakl-$os-$arch.tar.gz"
 
 printf 'Downloading %s...\n' "$archive"
 curl -fsSL --retry 3 --retry-connrefused "$release_url/$archive" -o "$temporary/$archive" || fail "could not download $archive"
@@ -85,23 +85,23 @@ else
 fi
 [ "$actual" = "$expected" ] || fail "checksum verification failed for $archive"
 
-binary="localdesk-$os-$arch"
+binary="stakl-$os-$arch"
 tar -xzf "$temporary/$archive" -C "$temporary" "$binary" || fail "could not extract $archive"
 [ -f "$temporary/$binary" ] || fail "$archive does not contain $binary"
 
 mkdir -p "$install_dir" || fail "could not create $install_dir"
 [ -d "$install_dir" ] || fail "install destination is not a directory: $install_dir"
-target="$install_dir/localdesk"
+target="$install_dir/stakl"
 [ ! -d "$target" ] || fail "install target is a directory: $target"
-staged="$install_dir/.localdesk-install.$$"
+staged="$install_dir/.stakl-install.$$"
 cp "$temporary/$binary" "$staged" || fail "could not write to $install_dir"
 chmod 0755 "$staged" || fail "could not make the installed binary executable"
 mv -f "$staged" "$target" || fail "could not replace $target"
 staged=""
 
 installed_version=$("$target" --version 2>/dev/null || true)
-printf 'Installed %s at %s\n' "${installed_version:-LocalDesk}" "$target"
+printf 'Installed %s at %s\n' "${installed_version:-Stakl}" "$target"
 case ":${PATH:-}:" in
-	*":$install_dir:"*) printf 'Run: localdesk\n' ;;
-	*) printf 'Add %s to PATH, then run: localdesk\n' "$install_dir" ;;
+	*":$install_dir:"*) printf 'Run: stakl\n' ;;
+	*) printf 'Add %s to PATH, then run: stakl\n' "$install_dir" ;;
 esac

@@ -2,8 +2,8 @@ package health
 
 import (
 	"context"
-	"localdesk/internal/config"
-	"localdesk/internal/runner"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/runner"
 	"net"
 	"net/http"
 	"net/http/httptest"

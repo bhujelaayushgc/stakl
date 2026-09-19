@@ -6,15 +6,15 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: process.env.LOCALDESK_DEV_URL || "http://127.0.0.1:49152",
+        target: process.env.STAKL_DEV_URL || "http://127.0.0.1:49152",
         changeOrigin: true,
         configure(proxy) {
           proxy.on("proxyReq", (req) => {
             req.removeHeader("origin");
-            if (process.env.LOCALDESK_DEV_TOKEN)
+            if (process.env.STAKL_DEV_TOKEN)
               req.setHeader(
                 "Authorization",
-                `Bearer ${process.env.LOCALDESK_DEV_TOKEN}`,
+                `Bearer ${process.env.STAKL_DEV_TOKEN}`,
               );
           });
         },

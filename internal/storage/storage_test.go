@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"localdesk/internal/events"
+	"github.com/bhujelaayushgc/stakl/internal/events"
 	"path/filepath"
 	"testing"
 	"time"

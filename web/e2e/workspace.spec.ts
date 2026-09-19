@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 const instance = () =>
-  JSON.parse(process.env.LOCALDESK_TEST_INSTANCE!) as {
+  JSON.parse(process.env.STAKL_TEST_INSTANCE!) as {
     url: string;
     token: string;
   };
@@ -83,7 +83,7 @@ test("desktop controls, live logs, keyboard palette and editor safety", async ({
   await editor.fill("version: 99\n");
   await page.getByRole("button", { name: "Validate", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("version must be 1");
-  expect(await readFile(process.env.LOCALDESK_TEST_CONFIG!, "utf8")).toBe(
+  expect(await readFile(process.env.STAKL_TEST_CONFIG!, "utf8")).toBe(
     original,
   );
   await editor.fill(

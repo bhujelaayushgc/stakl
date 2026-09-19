@@ -1,6 +1,6 @@
 # Internal API
 
-All routes require `Authorization: Bearer <instance token>` or the authenticated browser cookie. Mutation requests additionally require `X-LocalDesk: 1`. Browser origins and Host are checked. The private instance descriptor supplies the CLI address/token. Tokens must not be committed to source control.
+All routes require `Authorization: Bearer <instance token>` or the authenticated browser cookie. Mutation requests additionally require `X-Stakl: 1`. Browser origins and Host are checked. The private instance descriptor supplies the CLI address/token. Tokens must not be committed to source control.
 
 | Method | Route | Purpose |
 | --- | --- | --- |

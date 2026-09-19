@@ -5,7 +5,7 @@ frontend:
 	cd web && npm ci --legacy-peer-deps && npm run build
 build: frontend
 	mkdir -p bin
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/localdesk ./cmd/localdesk
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/stakl ./cmd/stakl
 dev:
 	bash scripts/dev.sh
 test: frontend
@@ -24,7 +24,7 @@ browser-test: build
 dist: frontend
 	mkdir -p dist
 	@for os in darwin linux; do for arch in arm64 amd64; do \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o dist/localdesk-$$os-$$arch ./cmd/localdesk || exit 1; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o dist/stakl-$$os-$$arch ./cmd/stakl || exit 1; \
 	done; done
 clean:
 	rm -rf bin dist

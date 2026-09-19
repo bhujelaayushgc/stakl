@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"localdesk/internal/config"
-	"localdesk/internal/manager"
-	"localdesk/internal/storage"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/manager"
+	"github.com/bhujelaayushgc/stakl/internal/storage"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -68,7 +68,7 @@ func TestAuthenticationOriginAndHost(t *testing.T) {
 		r.Host = tc.host
 		r.Header.Set("Origin", tc.origin)
 		r.Header.Set("Authorization", "Bearer "+tc.token)
-		r.Header.Set("X-LocalDesk", tc.header)
+		r.Header.Set("X-Stakl", tc.header)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		if w.Code != tc.want {

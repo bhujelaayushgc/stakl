@@ -2,10 +2,10 @@ package manager
 
 import (
 	"context"
-	"localdesk/internal/config"
-	"localdesk/internal/runner"
-	"localdesk/internal/storage"
-	"localdesk/internal/supervisor"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/runner"
+	"github.com/bhujelaayushgc/stakl/internal/storage"
+	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"os"
 	"path/filepath"
 	"testing"

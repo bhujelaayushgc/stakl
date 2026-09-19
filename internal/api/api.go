@@ -6,12 +6,12 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/manager"
+	"github.com/bhujelaayushgc/stakl/internal/runner"
+	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"io"
 	"io/fs"
-	"localdesk/internal/config"
-	"localdesk/internal/manager"
-	"localdesk/internal/runner"
-	"localdesk/internal/supervisor"
 	"log"
 	"net"
 	"net/http"
@@ -124,15 +124,15 @@ func (s *Server) Handler() http.Handler {
 				token = cookie.Value
 			}
 			if !s.valid(token) {
-				errorJSON(w, fmt.Errorf("open LocalDesk from the CLI to authenticate this browser"), 401)
+				errorJSON(w, fmt.Errorf("open Stakl from the CLI to authenticate this browser"), 401)
 				return
 			}
 			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
 				errorJSON(w, fmt.Errorf("cross-origin request refused"), 403)
 				return
 			}
-			if r.Method != "GET" && r.Header.Get("X-LocalDesk") != "1" {
-				errorJSON(w, fmt.Errorf("X-LocalDesk header required"), 403)
+			if r.Method != "GET" && r.Header.Get("X-Stakl") != "1" {
+				errorJSON(w, fmt.Errorf("X-Stakl header required"), 403)
 				return
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
@@ -141,7 +141,7 @@ func (s *Server) Handler() http.Handler {
 	})
 }
 func (s *Server) cookieName() string {
-	return fmt.Sprintf("localdesk_%x", sha256.Sum256([]byte(s.Address)))[:26]
+	return fmt.Sprintf("stakl_%x", sha256.Sum256([]byte(s.Address)))[:26]
 }
 func (s *Server) validHost(address string) bool {
 	if address == s.Address {
@@ -566,7 +566,7 @@ func Client(ctx context.Context, address, token, method, path string, body io.Re
 		return nil, e
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-LocalDesk", "1")
+	req.Header.Set("X-Stakl", "1")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

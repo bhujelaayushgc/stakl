@@ -3,7 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
-	"localdesk/internal/events"
+	"github.com/bhujelaayushgc/stakl/internal/events"
 	_ "modernc.org/sqlite"
 	"os"
 	"time"

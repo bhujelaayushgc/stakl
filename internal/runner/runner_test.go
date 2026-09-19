@@ -2,8 +2,8 @@ package runner
 
 import (
 	"context"
-	"localdesk/internal/config"
-	"localdesk/internal/supervisor"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +42,7 @@ func TestEnvironmentRejectsInvalidNames(t *testing.T) {
 func TestFailedProcessStartDoesNotBlockRetry(t *testing.T) {
 	dir := t.TempDir()
 	p := &Process{Base{Dir: dir, Logging: config.Logging{MaxSizeMB: 1, MaxFiles: 1, RetentionDays: 1}}}
-	a := config.App{ID: "broken", Name: "Broken", Cwd: dir, Start: config.Command{Command: "localdesk-command-that-does-not-exist"}, Stop: config.Stop{Timeout: config.Duration(time.Second)}}
+	a := config.App{ID: "broken", Name: "Broken", Cwd: dir, Start: config.Command{Command: "stakl-command-that-does-not-exist"}, Stop: config.Stop{Timeout: config.Duration(time.Second)}}
 	r, e := p.Start(context.Background(), a)
 	if e == nil {
 		t.Fatal("missing executable started")

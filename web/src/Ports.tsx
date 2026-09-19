@@ -95,7 +95,7 @@ export function PortsPage({
       </div>
       <p className="muted ports-note">
         TCP listeners and UDP bindings visible to your user, including services
-        outside LocalDesk, plus Docker's published host ports. Configured ports
+        outside Stakl, plus Docker's published host ports. Configured ports
         remain listed when no listener is detected. An unlisted port is not
         guaranteed to be available.
       </p>
@@ -149,7 +149,7 @@ export function PortsPage({
                   <th scope="col">Status</th>
                   <th scope="col">Process</th>
                   <th scope="col">Address</th>
-                  <th scope="col">LocalDesk services</th>
+                  <th scope="col">Stakl services</th>
                 </tr>
               </thead>
               <tbody>

@@ -77,7 +77,7 @@ mcp:
   autostart: {delay: 3s}
 ```
 
-Stdio-only MCP servers normally belong to the client that owns their stdin. Use a persistent HTTP/SSE transport when managing them independently with LocalDesk; there is no interactive stdin terminal in the dashboard.
+Stdio-only MCP servers normally belong to the client that owns their stdin. Use a persistent HTTP/SSE transport when managing them independently with Stakl; there is no interactive stdin terminal in the dashboard.
 
 ## External PostgreSQL
 

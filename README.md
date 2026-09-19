@@ -1,10 +1,10 @@
-# LocalDesk
+# Stakl
 
 One place to run everything on your machine.
 
-LocalDesk manages development servers, scripts, background workers, local tools, and Docker Compose projects without installing each application as an operating-system service. It combines a Go controller, an embedded React dashboard, a CLI, readable YAML configuration, and SQLite runtime history.
+Stakl manages development servers, scripts, background workers, local tools, and Docker Compose projects without installing each application as an operating-system service. It combines a Go controller, an embedded React dashboard, a CLI, readable YAML configuration, and SQLite runtime history.
 
-![LocalDesk dashboard with real disposable test processes](docs/images/dashboard.png)
+![Stakl dashboard with real disposable test processes](docs/images/dashboard.png)
 
 *Screenshot from the browser integration test. The listed applications are real disposable processes.*
 
@@ -13,33 +13,33 @@ LocalDesk manages development servers, scripts, background workers, local tools,
 Tagged releases contain standalone macOS and Linux binaries for arm64 and amd64. Install the latest release without Go, Node.js, or administrator access:
 
 ```sh
-curl -fsSL https://github.com/bhujelaayushgc/localdesk/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/install.sh | sh
 ```
 
-The installer detects the current platform, downloads the matching archive, verifies its SHA-256 checksum, and installs `localdesk` to `~/.local/bin`. Add that directory to `PATH` if prompted, then run:
+The installer detects the current platform, downloads the matching archive, verifies its SHA-256 checksum, and installs `stakl` to `~/.local/bin`. Add that directory to `PATH` if prompted, then run:
 
 ```sh
-localdesk
+stakl
 ```
 
 Rerun the installer to upgrade. Pin a version or choose another writable installation directory with environment variables:
 
 ```sh
-curl -fsSL https://github.com/bhujelaayushgc/localdesk/releases/latest/download/install.sh | LOCALDESK_VERSION=v0.1.0 sh
-curl -fsSL https://github.com/bhujelaayushgc/localdesk/releases/latest/download/install.sh | LOCALDESK_INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/install.sh | STAKL_VERSION=v0.1.0 sh
+curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/install.sh | STAKL_INSTALL_DIR=/usr/local/bin sh
 ```
 
-The installer never starts LocalDesk or changes `~/.localdesk`. To uninstall the executable, remove `~/.local/bin/localdesk`; configuration and runtime history remain intact.
+The installer never starts Stakl or changes `~/.stakl`. To uninstall the executable, remove `~/.local/bin/stakl`; configuration and runtime history remain intact.
 
 For a manual installation, download the archive for your platform and `checksums.txt` from GitHub Releases, verify the archive, then extract it:
 
 ```sh
-grep 'localdesk-darwin-arm64.tar.gz$' checksums.txt | shasum -a 256 -c -
-tar -xzf localdesk-darwin-arm64.tar.gz
-./localdesk-darwin-arm64
+grep 'stakl-darwin-arm64.tar.gz$' checksums.txt | shasum -a 256 -c -
+tar -xzf stakl-darwin-arm64.tar.gz
+./stakl-darwin-arm64
 ```
 
-Linux users can replace `shasum -a 256` with `sha256sum`. Release binaries are not currently code-signed; macOS may require approval in **System Settings → Privacy & Security**. The first launch creates `~/.localdesk/config.yml`, starts the controller at `http://127.0.0.1:49152`, and opens an authenticated browser session.
+Linux users can replace `shasum -a 256` with `sha256sum`. Release binaries are not currently code-signed; macOS may require approval in **System Settings → Privacy & Security**. The first launch creates `~/.stakl/config.yml`, starts the controller at `http://127.0.0.1:49152`, and opens an authenticated browser session.
 
 ## Build and run
 
@@ -47,21 +47,21 @@ Requires Go 1.26+ and Node.js 22+ **to build**. The resulting executable needs n
 
 ```sh
 make build
-./bin/localdesk
+./bin/stakl
 ```
 
 The initial workspace is empty. Use **Discover apps** to scan a project directory and review suggested commands, or edit YAML directly.
 
-Optionally copy `bin/localdesk` to a directory on your `PATH`. No installation script, OS service registration, cloud account, or telemetry is required. Running it again opens the existing dashboard.
+Optionally copy `bin/stakl` to a directory on your `PATH`. No installation script, OS service registration, cloud account, or telemetry is required. Running it again opens the existing dashboard.
 
 ```sh
-localdesk --config /path/to/config.yml
-LOCALDESK_CONFIG=/path/to/config.yml localdesk
-localdesk --port 49160 --no-browser
-localdesk open
+stakl --config /path/to/config.yml
+STAKL_CONFIG=/path/to/config.yml stakl
+stakl --port 49160 --no-browser
+stakl open
 ```
 
-Configuration path precedence: `--config`, `LOCALDESK_CONFIG`, then `~/.localdesk/config.yml`. Keep each workspace's configuration in a separate directory: its database, logs, lock, and launch records live beside it.
+Configuration path precedence: `--config`, `STAKL_CONFIG`, then `~/.stakl/config.yml`. Keep each workspace's configuration in a separate directory: its database, logs, lock, and launch records live beside it.
 
 ## A first application
 
@@ -113,29 +113,29 @@ Change the directory, command and port to match an actual project. Missing direc
 - `Cmd/Ctrl+K` command palette. Light, dark, and system themes. Responsive layout and keyboard focus.
 - Optional YAML editor with highlighting, validation, conflict detection, backups, and reload. Raw YAML is concealed until explicitly revealed.
 - Discovery suggestions require review and never start automatically. Global Stop All requires confirmation.
-- Open a service's **More info** menu item (or click its name) for the project path and configured/detected ports. Running Compose services use Docker's published host ports automatically; no `ports` configuration is needed for detection. The Ports page lists local TCP listeners, UDP bindings and Docker-published ports, including processes outside LocalDesk, and refreshes every 15 seconds while open. Local socket inspection uses `lsof` (included on macOS; install it on Linux) and is limited to processes visible to your user. An absent listener is not a guarantee that a port is available.
+- Open a service's **More info** menu item (or click its name) for the project path and configured/detected ports. Running Compose services use Docker's published host ports automatically; no `ports` configuration is needed for detection. The Ports page lists local TCP listeners, UDP bindings and Docker-published ports, including processes outside Stakl, and refreshes every 15 seconds while open. Local socket inspection uses `lsof` (included on macOS; install it on Linux) and is limited to processes visible to your user. An absent listener is not a guarantee that a port is available.
 
 ## CLI
 
 ```sh
-localdesk status                       # alias: list
-localdesk start web
-localdesk stop web
-localdesk restart web
-localdesk logs web
-localdesk logs web --follow
-localdesk profile start development
-localdesk profile stop development
-localdesk profile restart development
-localdesk start --all
-localdesk stop --all                   # prompts; --yes for unattended use
-localdesk config validate
-localdesk config path
-localdesk config reload
-localdesk init
-localdesk backup
-localdesk reset-state --yes
-localdesk --version
+stakl status                       # alias: list
+stakl start web
+stakl stop web
+stakl restart web
+stakl logs web
+stakl logs web --follow
+stakl profile start development
+stakl profile stop development
+stakl profile restart development
+stakl start --all
+stakl stop --all                   # prompts; --yes for unattended use
+stakl config validate
+stakl config path
+stakl config reload
+stakl init
+stakl backup
+stakl reset-state --yes
+stakl --version
 ```
 
 Operational CLI commands use the running controller's authenticated localhost API. If none is running, they explain how to start one. `init`, `config path`, and `config validate` work without a controller. `backup` uses a consistent SQLite snapshot; `reset-state` requires the controller and all verified launches to be stopped. It preserves configuration, logs, and project directories.
@@ -144,7 +144,7 @@ Operational CLI commands use the running controller's authenticated localhost AP
 
 A runner registry implements **process**, **shell**, **docker-compose**, and **custom** behavior. The manager handles dependency graphs, health thresholds, profiles, lifecycle events, and bounded restart policies. React consumes REST and server-sent events. Built assets are embedded in the Go binary. See [architecture](docs/architecture.md) and [API](docs/api.md).
 
-Each normal process launch gets a detached LocalDesk supervisor, a private authenticated Unix socket, and a separate workload process group. Supervisors capture rotating logs and survive controller exits. After a restart the controller authenticates to the supervisor before reclaiming ownership; it never kills a cached PID. Unverifiable launches block duplicate starts. External processes are protected; only an explicitly configured custom stop command can stop them.
+Each normal process launch gets a detached Stakl supervisor, a private authenticated Unix socket, and a separate workload process group. Supervisors capture rotating logs and survive controller exits. After a restart the controller authenticates to the supervisor before reclaiming ownership; it never kills a cached PID. Unverifiable launches block duplicate starts. External processes are protected; only an explicitly configured custom stop command can stop them.
 
 The parent remains unreaped during descendant cleanup, preventing process-group ID reuse while signaling. TERM/INT/etc. is followed by KILL after the configured timeout. Programs that deliberately escape their process group by daemonizing need a custom runner with status and stop commands. This is a local control plane, not a sandbox for untrusted commands.
 
@@ -155,7 +155,7 @@ Localhost is the default. All API calls require a token; browser sessions use Ht
 ```sh
 make dev            # backend + Vite HMR, isolated .dev/config.yml
 make frontend       # reproducible npm install and production frontend
-make build          # standalone bin/localdesk
+make build          # standalone bin/stakl
 make test           # Go race tests and frontend state tests
 make lint           # Go vet/format and TypeScript checks
 make integration    # disposable real-process end-to-end test
@@ -166,7 +166,7 @@ make dist           # four CGO-free binaries
 
 The development frontend is at `http://127.0.0.1:5173`; its proxy reads the development controller token. Keep Vite bound to localhost. `make dev` discovers the address configured in `.dev/config.yml`. Frontend dependencies use an npm lockfile. Go dependencies use `go.sum`. GitHub Actions tests on macOS/Linux and publishes checksummed macOS/Linux arm64/amd64 archives for `v*` tags.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before sending changes and [SECURITY.md](SECURITY.md) for private vulnerability reporting. LocalDesk is available under the [MIT License](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md) before sending changes and [SECURITY.md](SECURITY.md) for private vulnerability reporting. Stakl is available under the [MIT License](LICENSE).
 
 ## Persistence and operating limits
 
@@ -177,6 +177,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before sending changes and [SECURITY.md](
 - `instance.json`: current controller address/token. `instance.lock`: OS-backed single-instance lock.
 - `internal.log`: controller diagnostics, rotated on startup above 5 MB.
 
-Live reload keeps the last valid configuration, refuses removal of active apps, and leaves running launch configuration intact. Server binding/token changes require a controller restart. Restarting the computer stops workloads; launch LocalDesk to trigger configured autostart. LocalDesk does not register itself or apps with launchd/systemd.
+Live reload keeps the last valid configuration, refuses removal of active apps, and leaves running launch configuration intact. Server binding/token changes require a controller restart. Restarting the computer stops workloads; launch Stakl to trigger configured autostart. Stakl does not register itself or apps with launchd/systemd.
 
 Health is monitored by a bounded, serialized worker loop. Lifecycle operations are serialized for predictable ownership; very large workspaces or slow custom checks can delay other operations. Log views show up to 5,000 lines, downloads up to 10,000 recent lines; full retained JSONL files are in `logs/`. Favorites/theme are browser-local preferences. Discovery searches four directory levels and at most 20,000 entries. Windows has an explicit unsupported platform boundary pending a job-object implementation.

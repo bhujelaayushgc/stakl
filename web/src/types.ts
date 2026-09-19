@@ -225,14 +225,14 @@ export function profileState(p: Profile, apps: App[]) {
 export async function request<T>(path: string, body?: unknown): Promise<T> {
   const r = await fetch("/api" + path, {
     method: body === undefined ? "GET" : "POST",
-    headers: { "Content-Type": "application/json", "X-LocalDesk": "1" },
+    headers: { "Content-Type": "application/json", "X-Stakl": "1" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let data;
   try {
     data = await r.json();
   } catch {
-    throw Error(`LocalDesk returned HTTP ${r.status}`);
+    throw Error(`Stakl returned HTTP ${r.status}`);
   }
   if (!r.ok) throw Error(data.error || `HTTP ${r.status}`);
   return data;

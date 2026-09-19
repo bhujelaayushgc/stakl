@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Requires Docker. Creates and removes only a unique localdesk-test Compose project."""
+"""Requires Docker. Creates and removes only a unique stakl-test Compose project."""
 import json, pathlib, signal, socket, subprocess, tempfile, time, urllib.request, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-with tempfile.TemporaryDirectory(prefix='localdesk-compose-') as temp:
- d=pathlib.Path(temp); project='localdesk-test-'+uuid.uuid4().hex[:10]
+with tempfile.TemporaryDirectory(prefix='stakl-compose-') as temp:
+ d=pathlib.Path(temp); project='stakl-test-'+uuid.uuid4().hex[:10]
  with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
  compose=d/'compose.yml';compose.write_text('''services:
   ticker:
@@ -28,7 +28,7 @@ apps:
     health: {{type: docker, interval: 1s, failure_threshold: 1}}
     stop: {{timeout: 2s}}
 ''')
- proc=subprocess.Popen([str(ROOT/'bin/localdesk'),'--config',str(cfg),'--no-browser'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+ proc=subprocess.Popen([str(ROOT/'bin/stakl'),'--config',str(cfg),'--no-browser'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
  def wait(fn):
   end=time.time()+35
   while time.time()<end:
@@ -40,7 +40,7 @@ apps:
  try:
   wait(lambda:(d/'instance.json').exists());token=json.loads((d/'instance.json').read_text())['token']
   def api(path,body=None):
-   r=urllib.request.Request(f'http://127.0.0.1:{port}/api'+path,data=b'{}' if body is not None else None,headers={'Authorization':'Bearer '+token,'X-LocalDesk':'1'})
+   r=urllib.request.Request(f'http://127.0.0.1:{port}/api'+path,data=b'{}' if body is not None else None,headers={'Authorization':'Bearer '+token,'X-Stakl':'1'})
    with urllib.request.urlopen(r,timeout=120) as response:return json.load(response)
   assert api('/apps/stack/start',{})['stack']=='ok'
   wait(lambda:api('/apps/stack')['runtime']['state']=='healthy')

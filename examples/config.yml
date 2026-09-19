@@ -1,5 +1,5 @@
 # A usable workspace with ordinary Unix commands. Nothing starts automatically.
-# Run: localdesk --config ./examples/config.yml
+# Run: stakl --config ./examples/config.yml
 version: 1
 server:
   host: 127.0.0.1

@@ -25,7 +25,7 @@ The controller starts a detached copy of its own executable as a private supervi
 
 On controller restart, launch records are reconciled against authenticated supervisor responses. This includes the crash window between creating the supervisor and recording runtime state. PID, PGID, timestamps, exit status, ownership and launch ID are persisted. PID alone never authorizes a kill. Launch records also retain the kernel boot-session ID. A verified change of boot session retires stale launches without signaling any PID, allowing autostart after a machine reboot; a missing supervisor within the same boot remains unverified.
 
-An unresponsive/missing supervisor without a final exit record produces **unknown**. LocalDesk blocks duplicate starts and refuses to kill that process. Inspect the workload manually; do not remove launch records simply to bypass ownership checks. A verified final exit record permits a fresh launch.
+An unresponsive/missing supervisor without a final exit record produces **unknown**. Stakl blocks duplicate starts and refuses to kill that process. Inspect the workload manually; do not remove launch records simply to bypass ownership checks. A verified final exit record permits a fresh launch.
 
 ## Stopping
 
@@ -37,7 +37,7 @@ Programs can deliberately call `setsid`/`setpgid` to escape their group. Do not 
 
 ## Controller shutdown
 
-Controller exit leaves apps and log supervisors running by default. Per-app `lifecycle.stop_on_localdesk_exit: true` opts into shutdown cleanup. It does not create an OS service. A machine restart stops everything; LocalDesk autostart runs next time the controller launches.
+Controller exit leaves apps and log supervisors running by default. Per-app `lifecycle.stop_on_stakl_exit: true` opts into shutdown cleanup. It does not create an OS service. A machine restart stops everything; Stakl autostart runs next time the controller launches.
 
 Keep the binary accessible at its launch path until started supervisors have booted. Once running they do not depend on the controller process. On Linux/macOS, closing a terminal does not terminate a supervisor's separate session.
 

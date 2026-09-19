@@ -2,7 +2,7 @@ package supervisor
 
 import (
 	"fmt"
-	"localdesk/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/config"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -128,11 +128,11 @@ func TestRotationBounded(t *testing.T) {
 
 func TestCommandUsesApplicationPath(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "localdesk-only-test")
+	path := filepath.Join(dir, "stakl-only-test")
 	if e := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s' \"$VALUE\"\n"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	cmd, e := Command(config.Command{Command: "localdesk-only-test"}, config.App{Cwd: dir}, []string{"PATH=" + dir, "VALUE=app-env"})
+	cmd, e := Command(config.Command{Command: "stakl-only-test"}, config.App{Cwd: dir}, []string{"PATH=" + dir, "VALUE=app-env"})
 	if e != nil {
 		t.Fatal(e)
 	}

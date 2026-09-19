@@ -42,7 +42,7 @@ apps:
 func TestValidationErrors(t *testing.T) {
 	dir := t.TempDir()
 	base := "version: 1\napps:\n  a:\n    start: {command: sleep}\n"
-	cases := map[string]string{"unknown field": base + "    typo: yes\n", "unknown type": base + "    type: kubernetes\n", "duration": base + "    stop: {timeout: eventually}\n", "cycle": base + "    depends_on: [a]\n", "missing dependency": base + "    depends_on: [missing]\n", "invalid check": base + "    health: {type: tcp, port: invalid}\n", "bad port": base + "    health: {type: tcp, port: 99999}\n", "missing cwd": base + "    cwd: /does-not-exist-localdesk\n", "duplicate id": base + "  a:\n    start: {command: sleep}\n", "invalid env": base + "    env: {'BAD=NAME': value}\n", "unsafe link": base + "    links: {app: 'javascript:alert(1)'}\n", "remote no auth": "version: 1\nserver: {host: 0.0.0.0}\n"}
+	cases := map[string]string{"unknown field": base + "    typo: yes\n", "unknown type": base + "    type: kubernetes\n", "duration": base + "    stop: {timeout: eventually}\n", "cycle": base + "    depends_on: [a]\n", "missing dependency": base + "    depends_on: [missing]\n", "invalid check": base + "    health: {type: tcp, port: invalid}\n", "bad port": base + "    health: {type: tcp, port: 99999}\n", "missing cwd": base + "    cwd: /does-not-exist-stakl\n", "duplicate id": base + "  a:\n    start: {command: sleep}\n", "invalid env": base + "    env: {'BAD=NAME': value}\n", "unsafe link": base + "    links: {app: 'javascript:alert(1)'}\n", "remote no auth": "version: 1\nserver: {host: 0.0.0.0}\n"}
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {
 			if _, e := Parse([]byte(text), dir); e == nil {

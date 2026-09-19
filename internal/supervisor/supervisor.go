@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/bhujelaayushgc/stakl/internal/config"
 	"github.com/mattn/go-shellwords"
-	"localdesk/internal/config"
 	"net"
 	"net/http"
 	"os"
@@ -60,7 +60,7 @@ func AtomicJSON(path string, v any) error {
 	return AtomicWrite(path, b)
 }
 func AtomicWrite(path string, b []byte) error {
-	f, e := os.CreateTemp(filepath.Dir(path), ".localdesk-*")
+	f, e := os.CreateTemp(filepath.Dir(path), ".stakl-*")
 	if e != nil {
 		return e
 	}
@@ -136,7 +136,7 @@ func Launch(dir string, a config.App, c config.Command, env []string, logging co
 		return Spec{}, State{}, fmt.Errorf("cannot identify machine boot session: %v", e)
 	}
 	id := Token()[:24]
-	socketDir := filepath.Join(os.TempDir(), fmt.Sprintf("localdesk-%d", os.Getuid()))
+	socketDir := filepath.Join(os.TempDir(), fmt.Sprintf("stakl-%d", os.Getuid()))
 	if e := os.MkdirAll(socketDir, 0700); e != nil {
 		return Spec{}, State{}, e
 	}

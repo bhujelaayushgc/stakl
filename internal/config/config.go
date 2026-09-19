@@ -156,7 +156,7 @@ type App struct {
 	Restart        Restart           `yaml:"restart,omitempty" json:"restart"`
 	Notifications  *bool             `yaml:"notifications,omitempty" json:"notifications"`
 	Lifecycle      struct {
-		StopOnExit bool `yaml:"stop_on_localdesk_exit" json:"stop_on_localdesk_exit"`
+		StopOnExit bool `yaml:"stop_on_stakl_exit" json:"stop_on_stakl_exit"`
 	} `yaml:"lifecycle,omitempty" json:"lifecycle"`
 }
 type Group struct {
@@ -209,11 +209,11 @@ func strictNode(n *yaml.Node, value any) error {
 	return d.Decode(value)
 }
 func Path() string {
-	if p := os.Getenv("LOCALDESK_CONFIG"); p != "" {
+	if p := os.Getenv("STAKL_CONFIG"); p != "" {
 		return Expand(p, "")
 	}
 	h, _ := os.UserHomeDir()
-	return filepath.Join(h, ".localdesk", "config.yml")
+	return filepath.Join(h, ".stakl", "config.yml")
 }
 func Expand(p, base string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
@@ -580,7 +580,7 @@ func (c *Config) Order(ids []string) ([]string, error) {
 	return out, nil
 }
 
-const Sample = `# LocalDesk configuration. Add apps here or use Discover in the dashboard.
+const Sample = `# Stakl configuration. Add apps here or use Discover in the dashboard.
 # Full schema: docs/configuration.md. Paths are relative to this file unless absolute.
 version: 1
 server:

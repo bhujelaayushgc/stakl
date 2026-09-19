@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"localdesk/internal/config"
-	"localdesk/internal/events"
-	"localdesk/internal/health"
-	"localdesk/internal/runner"
-	"localdesk/internal/storage"
-	"localdesk/internal/supervisor"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/events"
+	"github.com/bhujelaayushgc/stakl/internal/health"
+	"github.com/bhujelaayushgc/stakl/internal/runner"
+	"github.com/bhujelaayushgc/stakl/internal/storage"
+	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"log"
 	"os"
 	"path/filepath"
@@ -172,7 +172,7 @@ func (m *Manager) event(kind, id, message string) {
 			enabled = *a.Notifications
 		}
 		if enabled && m.Notify != nil {
-			go m.Notify("LocalDesk", message)
+			go m.Notify("Stakl", message)
 		}
 	}
 }
@@ -527,7 +527,7 @@ func (m *Manager) Operate(ctx context.Context, action string, ids []string, forc
 		return map[string]string{"error": e.Error()}
 	}
 	if (action == "start" || action == "restart") && m.ctx.Err() != nil {
-		return map[string]string{"error": "LocalDesk is shutting down"}
+		return map[string]string{"error": "Stakl is shutting down"}
 	}
 	c := m.Config()
 	order, e := c.Order(ids)
@@ -894,7 +894,7 @@ func (m *Manager) Reload() error {
 			}
 		}
 		if c.Server.Host != m.cfg.Server.Host || c.Server.Port != m.cfg.Server.Port || c.Server.Token != m.cfg.Server.Token {
-			e = fmt.Errorf("server binding/authentication changed; restart LocalDesk to apply")
+			e = fmt.Errorf("server binding/authentication changed; restart Stakl to apply")
 		}
 		m.mu.RUnlock()
 	}

@@ -30,7 +30,7 @@ func Lock(path string) (*os.File, error) {
 	}
 	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
 		f.Close()
-		return nil, fmt.Errorf("LocalDesk is already running for this state directory")
+		return nil, fmt.Errorf("Stakl is already running for this state directory")
 	}
 	return f, nil
 }

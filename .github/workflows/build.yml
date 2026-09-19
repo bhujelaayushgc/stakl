@@ -49,7 +49,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; fi
           make dist VERSION="$VERSION"
           mkdir -p dist/release
-          for binary in dist/localdesk-*; do
+          for binary in dist/stakl-*; do
             name="$(basename "$binary")"
             tar -czf "dist/release/$name.tar.gz" -C dist "$name"
           done
@@ -59,14 +59,14 @@ jobs:
       - name: Smoke-test installer
         run: |
           install_dir="$(mktemp -d)"
-          python3 -m http.server 48080 --directory dist/release >/tmp/localdesk-installer-http.log 2>&1 &
+          python3 -m http.server 48080 --directory dist/release >/tmp/stakl-installer-http.log 2>&1 &
           server=$!
           trap 'kill "$server" 2>/dev/null || true; rm -rf "$install_dir"' EXIT
-          LOCALDESK_RELEASE_URL=http://127.0.0.1:48080 LOCALDESK_INSTALL_DIR="$install_dir" sh ./install.sh
-          "$install_dir/localdesk" --version
+          STAKL_RELEASE_URL=http://127.0.0.1:48080 STAKL_INSTALL_DIR="$install_dir" sh ./install.sh
+          "$install_dir/stakl" --version
       - uses: actions/upload-artifact@v4
         with:
-          name: localdesk-binaries
+          name: stakl-binaries
           path: dist/release/*
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -77,9 +77,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: localdesk-binaries
+          name: stakl-binaries
           path: release
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --title "LocalDesk $GITHUB_REF_NAME"
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --title "Stakl $GITHUB_REF_NAME"

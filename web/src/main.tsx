@@ -153,12 +153,12 @@ function AppShell() {
       run: () => void;
     } | null>(null),
     [theme, setTheme] = useState(
-      localStorage.getItem("localdesk-theme") || "system",
+      localStorage.getItem("stakl-theme") || "system",
     ),
     [pins, setPins] = useState<Record<string, boolean>>(() =>
       (() => {
         try {
-          return JSON.parse(localStorage.getItem("localdesk-pins") || "{}");
+          return JSON.parse(localStorage.getItem("stakl-pins") || "{}");
         } catch {
           return {};
         }
@@ -219,7 +219,7 @@ function AppShell() {
         theme === "system" ? (mq.matches ? "dark" : "light") : theme);
     apply();
     mq.addEventListener("change", apply);
-    localStorage.setItem("localdesk-theme", theme);
+    localStorage.setItem("stakl-theme", theme);
     return () => mq.removeEventListener("change", apply);
   }, [theme]);
   useEffect(() => {
@@ -294,7 +294,7 @@ function AppShell() {
   const pin = (id: string) =>
     setPins((p) => {
       const n = { ...p, [id]: !pinned.has(id) };
-      localStorage.setItem("localdesk-pins", JSON.stringify(n));
+      localStorage.setItem("stakl-pins", JSON.stringify(n));
       return n;
     });
   const filtered = filterApps(
@@ -339,7 +339,7 @@ function AppShell() {
           <span className="brand-mark">
             <Terminal size={21} />
           </span>
-          LocalDesk<span className="local-tag">LOCAL</span>
+          Stakl<span className="local-tag">LOCAL</span>
         </a>
         <button className="palette-trigger" onClick={() => setPalette(true)}>
           <Search size={15} />
@@ -714,7 +714,7 @@ function AppShell() {
                     <h2>A home for everything you run.</h2>
                     <p>
                       Add your first application to start, stop, and monitor it
-                      here. LocalDesk keeps the commands so you don’t have to.
+                      here. Stakl keeps the commands so you don’t have to.
                     </p>
                     <div className="onboarding-actions">
                       <button
@@ -734,7 +734,7 @@ function AppShell() {
                       <code>{cfg?.path}</code>
                     </div>
                     <div className="onboarding-footnote">
-                      Processes stay running when LocalDesk closes. Your YAML
+                      Processes stay running when Stakl closes. Your YAML
                       stays yours.
                     </div>
                   </div>
@@ -1180,7 +1180,7 @@ function Detail({
         <StatusBadge status={a.runtime.state} />
         <span>
           {a.runtime.owned
-            ? "Managed by LocalDesk"
+            ? "Managed by Stakl"
             : a.runtime.state === "external"
               ? "External process"
               : "Not running"}
@@ -2062,7 +2062,7 @@ function DiscoverPage({
               <p>
                 {scanned
                   ? "Try a directory closer to your projects, or add applications directly in YAML."
-                  : "Select a directory to find local applications you can manage with LocalDesk."}
+                  : "Select a directory to find local applications you can manage with Stakl."}
               </p>
             </Empty>
           )}
@@ -2117,7 +2117,7 @@ function SystemPage() {
       )}
       <div className="system-grid">
         <section>
-          <h2>LocalDesk runtime</h2>
+          <h2>Stakl runtime</h2>
           <dl className="properties">
             {Object.entries(info)
               .filter(([k]) => k !== "config_error")

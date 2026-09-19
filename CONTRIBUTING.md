@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for improving LocalDesk. Keep changes focused, preserve the process-ownership safety model, and include a regression check for non-trivial behavior.
+Thanks for improving Stakl. Keep changes focused, preserve the process-ownership safety model, and include a regression check for non-trivial behavior.
 
 ## Setup
 

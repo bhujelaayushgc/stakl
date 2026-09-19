@@ -3,13 +3,13 @@
 import http.server, json, os, pathlib, signal, socket, subprocess, tempfile, threading, time, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-BIN = ROOT / 'bin/localdesk'
+BIN = ROOT / 'bin/stakl'
 def free_port():
     with socket.socket() as s:
         s.bind(('127.0.0.1',0)); return s.getsockname()[1]
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='localdesk-integration-') as temp:
+    with tempfile.TemporaryDirectory(prefix='stakl-integration-') as temp:
         d=pathlib.Path(temp); port=free_port(); app_port=free_port()
         ext=http.server.ThreadingHTTPServer(('127.0.0.1',0),http.server.BaseHTTPRequestHandler)
         threading.Thread(target=ext.serve_forever,daemon=True).start()
@@ -62,7 +62,7 @@ apps:
     name: Shutdown lifecycle test
     cwd: {d}
     start: {{command: 'sleep 120'}}
-    lifecycle: {{stop_on_localdesk_exit: true}}
+    lifecycle: {{stop_on_stakl_exit: true}}
   crash-loop:
     name: Crash-loop test
     cwd: {d}
@@ -99,7 +99,7 @@ apps:
             instance=json.loads((d/'instance.json').read_text())
             return p,instance['token']
         def api(path,body=None):
-            req=urllib.request.Request(f'http://127.0.0.1:{port}/api'+path,data=json.dumps(body).encode() if body is not None else None,headers={'Authorization':'Bearer '+token,'X-LocalDesk':'1','Content-Type':'application/json'})
+            req=urllib.request.Request(f'http://127.0.0.1:{port}/api'+path,data=json.dumps(body).encode() if body is not None else None,headers={'Authorization':'Bearer '+token,'X-Stakl':'1','Content-Type':'application/json'})
             with urllib.request.urlopen(req,timeout=25) as r:return json.load(r)
         def app(id):return api('/apps/'+id)
         def wait(fn,seconds=10):

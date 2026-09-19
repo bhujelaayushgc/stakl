@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 export default async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), "localdesk-browser-"));
+  const dir = await mkdtemp(join(tmpdir(), "stakl-browser-"));
   const net = createServer();
   await new Promise<void>((r) => net.listen(0, "127.0.0.1", r));
   const port = (net.address() as { port: number }).port;
@@ -43,7 +43,7 @@ apps:
 `,
   );
   const child = spawn(
-    resolve("../bin/localdesk"),
+    resolve("../bin/stakl"),
     ["--config", path, "--no-browser"],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -64,15 +64,15 @@ apps:
     child.kill();
     throw Error("Controller did not start: " + output);
   }
-  process.env.LOCALDESK_TEST_INSTANCE = JSON.stringify(instance);
-  process.env.LOCALDESK_TEST_CONFIG = path;
+  process.env.STAKL_TEST_INSTANCE = JSON.stringify(instance);
+  process.env.STAKL_TEST_CONFIG = path;
   return async () => {
     try {
       await fetch(instance!.url + "/api/actions/stop?confirm=true", {
         method: "POST",
         headers: {
           Authorization: "Bearer " + instance!.token,
-          "X-LocalDesk": "1",
+          "X-Stakl": "1",
         },
       });
     } finally {

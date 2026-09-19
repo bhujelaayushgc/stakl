@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/bhujelaayushgc/stakl/internal/api"
+	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/manager"
+	"github.com/bhujelaayushgc/stakl/internal/storage"
+	"github.com/bhujelaayushgc/stakl/internal/supervisor"
+	"github.com/bhujelaayushgc/stakl/web"
 	"io"
-	"localdesk/internal/api"
-	"localdesk/internal/config"
-	"localdesk/internal/manager"
-	"localdesk/internal/storage"
-	"localdesk/internal/supervisor"
-	"localdesk/web"
 	"log"
 	"net"
 	"net/http"
@@ -43,7 +43,7 @@ func main() {
 		return
 	}
 	if e := run(os.Args[1:]); e != nil {
-		fmt.Fprintln(os.Stderr, "LocalDesk:", e)
+		fmt.Fprintln(os.Stderr, "Stakl:", e)
 		os.Exit(1)
 	}
 }
@@ -74,8 +74,8 @@ func run(args []string) error {
 			fmt.Println(version)
 			return nil
 		case "--help", "help", "-h":
-			fmt.Println(`LocalDesk - local application control plane
-Usage: localdesk [--config PATH] [--port PORT] [--no-browser]
+			fmt.Println(`Stakl - local application control plane
+Usage: stakl [--config PATH] [--port PORT] [--no-browser]
   status | list                    List apps and runtime state
   start|stop|restart APP            Operate on an app
   start|stop --all [--yes]          Operate on included apps
@@ -127,13 +127,13 @@ Usage: localdesk [--config PATH] [--port PORT] [--no-browser]
 	inst, alive := existing(dir)
 	if len(args) > 0 && args[0] == "open" {
 		if !alive {
-			return fmt.Errorf("LocalDesk is not running; run localdesk first")
+			return fmt.Errorf("Stakl is not running; run stakl first")
 		}
 		return api.OpenBrowser(inst.URL + "/?token=" + inst.Token)
 	}
 	if len(args) > 0 {
 		if !alive {
-			return fmt.Errorf("LocalDesk is not running for %s; start localdesk first", path)
+			return fmt.Errorf("Stakl is not running for %s; start stakl first", path)
 		}
 		return cli(inst, args)
 	}
@@ -215,7 +215,7 @@ Usage: localdesk [--config PATH] [--port PORT] [--no-browser]
 	watchCtx, watchCancel := context.WithCancel(context.Background())
 	defer watchCancel()
 	go watch(watchCtx, m, path)
-	fmt.Printf("LocalDesk %s\n%s\nConfiguration: %s\n", version, inst.URL, path)
+	fmt.Printf("Stakl %s\n%s\nConfiguration: %s\n", version, inst.URL, path)
 	if !noBrowser && (c.Server.OpenBrowser == nil || *c.Server.OpenBrowser) {
 		if e = api.OpenBrowser(inst.URL + "/?token=" + token); e != nil {
 			log.Printf("browser: %v", e)
@@ -289,13 +289,13 @@ func cli(i instance, args []string) error {
 		}
 	case "profile":
 		if len(args) != 3 || !config.ValidID(args[2]) {
-			return fmt.Errorf("usage: localdesk profile start|stop|restart ID")
+			return fmt.Errorf("usage: stakl profile start|stop|restart ID")
 		}
 		method = "POST"
 		path = "/api/profiles/" + args[2] + "/" + args[1]
 	case "config":
 		if len(args) != 2 || args[1] != "reload" {
-			return fmt.Errorf("usage: localdesk config validate|path|reload")
+			return fmt.Errorf("usage: stakl config validate|path|reload")
 		}
 		method = "POST"
 		path = "/api/config/reload"
@@ -308,7 +308,7 @@ func cli(i instance, args []string) error {
 			path = "/api/apps/" + args[1] + "/logs?follow=true"
 		}
 	default:
-		return fmt.Errorf("unknown command %q; run localdesk --help", args[0])
+		return fmt.Errorf("unknown command %q; run stakl --help", args[0])
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

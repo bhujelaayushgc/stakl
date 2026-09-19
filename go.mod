@@ -1,4 +1,4 @@
-module localdesk
+module github.com/bhujelaayushgc/stakl
 
 go 1.26.0
 
