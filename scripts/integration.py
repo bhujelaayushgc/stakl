@@ -11,14 +11,17 @@ class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
         socketserver.TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address
 
-def free_port():
-    with socket.socket() as s:
-        s.bind(('127.0.0.1',0)); return s.getsockname()[1]
-
 def main():
     with tempfile.TemporaryDirectory(prefix='stakl-integration-') as temp:
-        d=pathlib.Path(temp); port=free_port(); app_port=free_port()
-        ext=LoopbackHTTPServer(('127.0.0.1',0),http.server.BaseHTTPRequestHandler)
+        d=pathlib.Path(temp)
+        # Hold both reservations until every fixture listener has its own port.
+        with socket.socket() as controller_socket, socket.socket() as worker_socket:
+            controller_socket.bind(('127.0.0.1', 0))
+            worker_socket.bind(('127.0.0.1', 0))
+            port=controller_socket.getsockname()[1]
+            app_port=worker_socket.getsockname()[1]
+            ext=LoopbackHTTPServer(('127.0.0.1',0),http.server.BaseHTTPRequestHandler)
+        assert len({port, app_port, ext.server_port}) == 3
         threading.Thread(target=ext.serve_forever,daemon=True).start()
         worker=d/'worker.py'
         worker.write_text(f'import sys\nsys.path.insert(0, {str(ROOT / "scripts")!r})\nfrom integration import LoopbackHTTPServer\n' + '''import faulthandler, http.server, os, signal, subprocess, sys, time
