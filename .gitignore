@@ -6,6 +6,7 @@
 /.dev/
 /.impeccable/
 .DS_Store
+__pycache__/
 *.db
 *.db-wal
 *.db-shm

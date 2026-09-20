@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Disposable end-to-end checks against the real binary. No user services touched."""
-import http.server, json, os, pathlib, signal, socket, subprocess, tempfile, threading, time, urllib.request
+import http.server, json, os, pathlib, signal, socket, socketserver, subprocess, tempfile, threading, time, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = ROOT / 'bin/stakl'
+
+class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer resolves the hostname here, which can stall macOS CI before listen().
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address
+
 def free_port():
     with socket.socket() as s:
         s.bind(('127.0.0.1',0)); return s.getsockname()[1]
@@ -11,10 +18,10 @@ def free_port():
 def main():
     with tempfile.TemporaryDirectory(prefix='stakl-integration-') as temp:
         d=pathlib.Path(temp); port=free_port(); app_port=free_port()
-        ext=http.server.ThreadingHTTPServer(('127.0.0.1',0),http.server.BaseHTTPRequestHandler)
+        ext=LoopbackHTTPServer(('127.0.0.1',0),http.server.BaseHTTPRequestHandler)
         threading.Thread(target=ext.serve_forever,daemon=True).start()
         worker=d/'worker.py'
-        worker.write_text('''import faulthandler, http.server, os, signal, subprocess, sys, time
+        worker.write_text(f'import sys\nsys.path.insert(0, {str(ROOT / "scripts")!r})\nfrom integration import LoopbackHTTPServer\n' + '''import faulthandler, http.server, os, signal, subprocess, sys, time
 faulthandler.dump_traceback_later(10)
 child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])
 open('child.pid','w').write(str(child.pid))
@@ -24,7 +31,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   self.send_response(200);self.send_header('Content-Length','2');self.end_headers();self.wfile.write(b'ok')
  def log_message(self,*args): pass
-server=http.server.ThreadingHTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler)
+server=LoopbackHTTPServer(('127.0.0.1',int(os.environ['PORT'])),Handler)
 print('http-ready',flush=True)
 faulthandler.cancel_dump_traceback_later()
 server.serve_forever()
