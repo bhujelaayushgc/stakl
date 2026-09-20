@@ -4,9 +4,13 @@ One place to run everything on your machine.
 
 Stakl manages development servers, scripts, background workers, local tools, and Docker Compose projects without installing each application as an operating-system service. It combines a Go controller, an embedded React dashboard, a CLI, readable YAML configuration, and SQLite runtime history.
 
-![Stakl dashboard with real disposable test processes](docs/images/dashboard.png)
-
-*Screenshot from the browser integration test. The listed applications are real disposable processes.*
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/411af251-a878-4123-ba24-e72dd287c879" poster="https://github.com/user-attachments/assets/a3bd65f0-0428-46ec-9a0e-4ab39f42ea4d" controls="controls" width="100%">
+    <a href="https://github.com/user-attachments/assets/411af251-a878-4123-ba24-e72dd287c879">
+      <img src="https://github.com/user-attachments/assets/a3bd65f0-0428-46ec-9a0e-4ab39f42ea4d" alt="Watch the Stakl overview video" width="100%" />
+    </a>
+  </video>
+</p>
 
 ## Install
 
@@ -105,6 +109,10 @@ apps:
 Change the directory, command and port to match an actual project. Missing directories and Compose files are validation errors. Read [configuration](docs/configuration.md), [process management](docs/process-management.md), [Docker](docs/docker.md), and [examples](docs/examples.md). [examples/config.yml](examples/config.yml) is a directly usable, non-autostarting workspace using ordinary Unix commands.
 
 ## Dashboard
+
+![Stakl dashboard with real disposable test processes](docs/images/dashboard.png)
+
+*Screenshot from the browser integration test. The listed applications are real disposable processes.*
 
 - Profiles above grouped application rows; search, status/type/group filters, and favorites.
 - Start, stop, restart, protected external detection, port occupancy, links, directory and terminal actions.

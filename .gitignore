@@ -13,3 +13,9 @@ __pycache__/
 
 /web/test-results/
 /web/playwright-report/
+
+# Skills and agent artifacts
+/.agents/
+/skills-lock.json
+/brag-output*/
+/.claude/
