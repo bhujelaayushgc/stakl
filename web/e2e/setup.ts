@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { createServer as createViteServer } from "vite";
 export default async function setup() {
   const dir = await mkdtemp(join(tmpdir(), "stakl-browser-"));
   const net = createServer();
@@ -64,7 +65,18 @@ apps:
     child.kill();
     throw Error("Controller did not start: " + output);
   }
-  process.env.STAKL_TEST_INSTANCE = JSON.stringify(instance);
+  process.env.STAKL_DEV_URL = instance.url;
+  process.env.STAKL_DEV_TOKEN = instance.token;
+  const vite = await createViteServer({
+    server: { host: "127.0.0.1", port: 0 },
+  });
+  await vite.listen();
+  const frontendURL = vite.resolvedUrls?.local[0];
+  if (!frontendURL) throw Error("Vite did not start");
+  process.env.STAKL_TEST_INSTANCE = JSON.stringify({
+    ...instance,
+    url: new URL(frontendURL).origin,
+  });
   process.env.STAKL_TEST_CONFIG = path;
   return async () => {
     try {
@@ -76,6 +88,7 @@ apps:
         },
       });
     } finally {
+      await vite.close();
       child.kill("SIGTERM");
       await new Promise<void>((r) => {
         if (child.exitCode !== null) r();

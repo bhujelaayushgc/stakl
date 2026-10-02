@@ -167,6 +167,9 @@ export const isActive = (s: Status) =>
     "external",
     "stopping",
   ].includes(s);
+export const canStopApp = (app: App) =>
+  app.runtime.owned ||
+  (app.config.type === "custom" && !!app.config.stop?.command);
 export const label = (s: string) =>
   ({
     active: "All running",

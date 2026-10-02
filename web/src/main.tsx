@@ -1,6 +1,7 @@
 import React, {
   useState,
   useEffect,
+  useLayoutEffect,
   useRef,
   useCallback,
   useMemo,
@@ -23,7 +24,6 @@ import {
   FolderOpen,
   HeartPulse,
   Layers3,
-  LayoutDashboard,
   LoaderCircle,
   Menu,
   MoreHorizontal,
@@ -35,9 +35,6 @@ import {
   Settings2,
   Square,
   Star,
-  Sun,
-  Moon,
-  Monitor,
   Terminal,
   Trash2,
   WrapText,
@@ -54,6 +51,7 @@ import "prismjs/components/prism-yaml";
 import YAML from "yaml";
 import {
   App,
+  canStopApp,
   Config,
   Event,
   Health,
@@ -70,7 +68,20 @@ import {
   servicePorts,
 } from "./types";
 import { PortsPage, usePortScan } from "./Ports";
+import {
+  EmptyState,
+  IconButton,
+  PageHeader,
+  SearchField,
+  StatusIndicator,
+} from "./ui";
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
 import "./style.css";
+import "./workstation.css";
 
 type Action = (id: string, action: string, profile?: boolean) => Promise<void>;
 const icons = {
@@ -78,6 +89,56 @@ const icons = {
   shell: Terminal,
   "docker-compose": Box,
   custom: Settings2,
+};
+const logTime = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+const numberFormat = new Intl.NumberFormat();
+const decimalFormat = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 1,
+});
+const views = new Set([
+  "dashboard",
+  "ports",
+  "activity",
+  "config",
+  "discover",
+  "system",
+]);
+const detailTabs = new Set([
+  "Overview",
+  "Logs",
+  "Health",
+  "History",
+  "Configuration",
+]);
+const route = () => {
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view") || "dashboard";
+  return {
+    page: views.has(view) ? view : "dashboard",
+    selected: params.get("app"),
+    tab: detailTabs.has(params.get("tab") || "")
+      ? params.get("tab")!
+      : "Overview",
+    search: params.get("q") || "",
+    group: params.get("group") || "",
+    status: params.get("status") || "",
+    type: params.get("type") || "",
+    favorites: params.get("favorites") === "1",
+  };
+};
+const routeUrl = (changes: Record<string, string | null>) => {
+  const url = new URL(window.location.href);
+  for (const [key, value] of Object.entries(changes)) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  url.hash = "";
+  return url;
 };
 const appIcon = (a: App["config"]) =>
   (
@@ -94,42 +155,6 @@ const appIcon = (a: App["config"]) =>
   )[a.icon || ""] ||
   icons[a.type as keyof typeof icons] ||
   Terminal;
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`status status-${status}`}>
-      <span className="status-dot" />
-      {label(status)}
-    </span>
-  );
-}
-function IconButton({
-  label: tip,
-  children,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
-  return (
-    <button className="icon-button" title={tip} aria-label={tip} {...props}>
-      {children}
-    </button>
-  );
-}
-function Empty({
-  icon: Icon = Layers3,
-  title,
-  children,
-}: {
-  icon?: typeof Layers3;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="empty">
-      <Icon size={28} />
-      <h3>{title}</h3>
-      {children}
-    </div>
-  );
-}
 function AppShell() {
   const [apps, setApps] = useState<App[]>([]),
     [cfg, setCfg] = useState<Config | null>(null),
@@ -137,19 +162,22 @@ function AppShell() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [connected, setConnected] = useState(false),
-    [page, setPage] = useState("dashboard"),
-    [selected, setSelected] = useState<string | null>(null),
-    [detailTab, setDetailTab] = useState("Overview"),
+    [page, setPage] = useState(() => route().page),
+    [selected, setSelected] = useState<string | null>(() => route().selected),
+    [detailTab, setDetailTab] = useState(() => route().tab),
     [busy, setBusy] = useState<Set<string>>(new Set()),
-    [search, setSearch] = useState(""),
-    [group, setGroup] = useState(""),
-    [status, setStatus] = useState(""),
-    [type, setType] = useState(""),
-    [favorites, setFavorites] = useState(false),
+    [search, setSearch] = useState(() => route().search),
+    [group, setGroup] = useState(() => route().group),
+    [status, setStatus] = useState(() => route().status),
+    [type, setType] = useState(() => route().type),
+    [favorites, setFavorites] = useState(() => route().favorites),
+    [configDirty, setConfigDirty] = useState(false),
+    [discoverDirty, setDiscoverDirty] = useState(false),
     [palette, setPalette] = useState(false),
     [confirm, setConfirm] = useState<{
       title: string;
       message: string;
+      actionLabel: string;
       run: () => void;
     } | null>(null),
     [theme, setTheme] = useState(
@@ -164,8 +192,106 @@ function AppShell() {
         }
       })(),
     ),
-    [mobileNav, setMobileNav] = useState(false);
+    [mobileNav, setMobileNav] = useState(false),
+    [isNarrow, setIsNarrow] = useState(
+      () => window.matchMedia("(max-width: 760px)").matches,
+    );
   const mounted = useRef(true);
+  const navTrigger = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const paletteContentRef = useRef<HTMLDivElement>(null);
+  const previousPage = useRef(page);
+  const historyIndex = useRef(0);
+  const currentUrl = useRef(window.location.href);
+  const revertingPop = useRef(false);
+  const dirtyPage = useRef({ page, configDirty, discoverDirty });
+  dirtyPage.current = { page, configDirty, discoverDirty };
+  const writeUrl = (url: URL, push = false, detailFrom = false) => {
+    if (url.href === window.location.href) return;
+    if (push) historyIndex.current += 1;
+    window.history[push ? "pushState" : "replaceState"](
+      {
+        ...window.history.state,
+        staklIndex: historyIndex.current,
+        staklDetailFrom: detailFrom,
+      },
+      "",
+      url,
+    );
+    currentUrl.current = window.location.href;
+  };
+  useEffect(() => {
+    historyIndex.current = window.history.state?.staklIndex ?? 0;
+    window.history.replaceState(
+      { ...window.history.state, staklIndex: historyIndex.current },
+      "",
+      window.location.href,
+    );
+    const onPopState = (event: PopStateEvent) => {
+      if (revertingPop.current) {
+        revertingPop.current = false;
+        return;
+      }
+      const next = route();
+      const dirty = dirtyPage.current;
+      if (
+        next.page !== dirty.page &&
+        ((dirty.page === "config" && dirty.configDirty) ||
+          (dirty.page === "discover" && dirty.discoverDirty)) &&
+        !window.confirm(
+          dirty.page === "config"
+            ? "Discard unsaved configuration changes?"
+            : "Discard your edited application draft?",
+        )
+      ) {
+        const targetIndex = event.state?.staklIndex;
+        if (typeof targetIndex === "number") {
+          revertingPop.current = true;
+          window.history.go(historyIndex.current - targetIndex);
+        } else {
+          window.history.pushState(
+            { staklIndex: ++historyIndex.current },
+            "",
+            currentUrl.current,
+          );
+        }
+        return;
+      }
+      historyIndex.current = event.state?.staklIndex ?? 0;
+      currentUrl.current = window.location.href;
+      setPage(next.page);
+      setSelected(next.selected);
+      setDetailTab(next.tab);
+      setSearch(next.search);
+      setGroup(next.group);
+      setStatus(next.status);
+      setType(next.type);
+      setFavorites(next.favorites);
+      setMobileNav(false);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    if (previousPage.current !== page) {
+      previousPage.current = page;
+      requestAnimationFrame(() =>
+        mainRef.current?.querySelector("h1")?.focus(),
+      );
+    }
+  }, [page]);
+  useEffect(() => {
+    writeUrl(
+      routeUrl({
+        q: search,
+        group,
+        status,
+        type,
+        favorites: favorites ? "1" : null,
+      }),
+    );
+  }, [search, group, status, type, favorites]);
   const ports = usePortScan(page === "ports" || !!selected);
   const refresh = useCallback(async () => {
     try {
@@ -178,7 +304,10 @@ function AppShell() {
         setCfg(c);
       }
     } catch (e) {
-      if (mounted.current) setError(String(e instanceof Error ? e.message : e));
+      if (mounted.current)
+        setError(
+          `Could not load workspace data: ${String(e instanceof Error ? e.message : e)}. Check the controller connection, then reload.`,
+        );
     } finally {
       setLoading(false);
     }
@@ -214,14 +343,29 @@ function AppShell() {
   }, [refresh]);
   useEffect(() => {
     const mq = matchMedia("(prefers-color-scheme: dark)");
-    const apply = () =>
-      (document.documentElement.dataset.theme =
-        theme === "system" ? (mq.matches ? "dark" : "light") : theme);
+    const apply = () => {
+      const resolved =
+        theme === "system" ? (mq.matches ? "dark" : "light") : theme;
+      document.documentElement.dataset.theme = resolved;
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute("content", resolved === "dark" ? "#111816" : "#f2f4f3");
+    };
     apply();
     mq.addEventListener("change", apply);
     localStorage.setItem("stakl-theme", theme);
     return () => mq.removeEventListener("change", apply);
   }, [theme]);
+  useEffect(() => {
+    const mq = matchMedia("(max-width: 760px)");
+    const update = () => setIsNarrow(mq.matches);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  useLayoutEffect(() => {
+    if (isNarrow && mobileNav)
+      sidebarRef.current?.querySelector<HTMLAnchorElement>("nav a")?.focus();
+  }, [isNarrow, mobileNav]);
   useEffect(() => {
     if (notice) {
       const t = setTimeout(() => setNotice(""), 7000);
@@ -246,7 +390,12 @@ function AppShell() {
         `${profile ? "Profile" : apps.find((a) => a.config.id === id)?.config.name || id}: ${action} complete`,
       );
     } catch (e) {
-      setError((e as Error).message);
+      const name = profile
+        ? "profile"
+        : apps.find((a) => a.config.id === id)?.config.name || id;
+      setError(
+        `Could not ${action} ${name}: ${(e as Error).message}. ${action === "directory" || action === "terminal" ? "Check the configured path and local permissions." : "Check Activity or the application logs for details."}`,
+      );
     } finally {
       setBusy((b) => {
         const next = new Set(b);
@@ -268,7 +417,9 @@ function AppShell() {
         throw Error(errors.map(([k, v]) => `${k}: ${v}`).join("\n"));
       setNotice(`${action} completed`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        `Could not ${action} workspace applications: ${(e as Error).message}. Check Activity or application logs for details.`,
+      );
     } finally {
       setBusy((b) => {
         const n = new Set(b);
@@ -279,7 +430,27 @@ function AppShell() {
     }
   };
   const openDetail = (id: string, tab = "Overview") => {
+    writeUrl(
+      routeUrl({ app: id, tab: tab === "Overview" ? null : tab }),
+      true,
+      true,
+    );
     setSelected(id);
+    setDetailTab(tab);
+  };
+  const closeDetail = () => {
+    if (window.history.state?.staklDetailFrom) window.history.back();
+    else {
+      writeUrl(routeUrl({ app: null, tab: null }));
+      setSelected(null);
+    }
+  };
+  const changeDetailTab = (tab: string) => {
+    writeUrl(
+      routeUrl({ tab: tab === "Overview" ? null : tab }),
+      false,
+      !!window.history.state?.staklDetailFrom,
+    );
     setDetailTab(tab);
   };
   const pinned = useMemo(
@@ -318,135 +489,157 @@ function AppShell() {
       await refresh();
       setNotice("Configuration reloaded");
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        `Could not reload configuration: ${(e as Error).message}. Open Configuration to inspect the YAML.`,
+      );
     }
   };
-  const nav = (p: string) => {
+  const nav = (p: string, saved = false) => {
+    if (
+      p !== page &&
+      !saved &&
+      ((page === "config" && configDirty) ||
+        (page === "discover" && discoverDirty)) &&
+      !window.confirm(
+        page === "config"
+          ? "Discard unsaved configuration changes?"
+          : "Discard your edited application draft?",
+      )
+    )
+      return;
+    if (page === "config") setConfigDirty(false);
+    if (page === "discover") setDiscoverDirty(false);
+    writeUrl(
+      routeUrl({ view: p === "dashboard" ? null : p, app: null, tab: null }),
+      true,
+    );
     setPage(p);
+    setSelected(null);
     setMobileNav(false);
+  };
+  const navHref = (p: string) =>
+    routeUrl({ view: p === "dashboard" ? null : p, app: null, tab: null }).href;
+  const onNavClick = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    p: string,
+  ) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    nav(p);
   };
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <aside
+        ref={sidebarRef}
+        id="primary-navigation"
+        className={`sidebar ${mobileNav ? "mobile-open" : ""}`}
+        inert={isNarrow && !mobileNav}
+        onBlur={(event) => {
+          if (
+            isNarrow &&
+            mobileNav &&
+            !event.currentTarget.contains(event.relatedTarget)
+          )
+            setMobileNav(false);
+        }}
+        onKeyDown={(event) => {
+          if (isNarrow && event.key === "Escape") {
+            setMobileNav(false);
+            navTrigger.current?.focus();
+          }
+        }}
+      >
         <a
-          href="#"
+          href={navHref("dashboard")}
           className="brand"
-          onClick={(e) => {
-            e.preventDefault();
-            nav("dashboard");
-          }}
+          onClick={(e) => onNavClick(e, "dashboard")}
         >
           <span className="brand-mark">
-            <Terminal size={21} />
+            <Layers3 size={19} aria-hidden="true" />
           </span>
-          Stakl<span className="local-tag">LOCAL</span>
+          Stakl
         </a>
         <button className="palette-trigger" onClick={() => setPalette(true)}>
-          <Search size={15} />
+          <Search size={15} aria-hidden="true" />
           <span>Find anything</span>
           <kbd>⌘ K</kbd>
         </button>
         <nav aria-label="Main navigation">
-          <button
-            className={page === "dashboard" && !favorites ? "active" : ""}
-            onClick={() => {
-              nav("dashboard");
-              setFavorites(false);
-            }}
+          <a
+            href={navHref("dashboard")}
+            className={page === "dashboard" ? "active" : ""}
+            aria-current={page === "dashboard" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "dashboard")}
           >
-            <LayoutDashboard />
-            Overview<span className="nav-count">{apps.length}</span>
-          </button>
-          <button
-            className={page === "dashboard" && favorites ? "active" : ""}
-            onClick={() => {
-              nav("dashboard");
-              setFavorites(true);
-            }}
-          >
-            <Star />
-            Favorites<span className="nav-count">{pinned.size}</span>
-          </button>
-          <button
-            className={page === "activity" ? "active" : ""}
-            onClick={() => nav("activity")}
-          >
-            <Activity />
-            Activity
-          </button>
-          <div className="nav-separator" />
-          <button
+            <Layers3 aria-hidden="true" />
+            Applications
+          </a>
+          <a
+            href={navHref("ports")}
             className={page === "ports" ? "active" : ""}
-            onClick={() => nav("ports")}
+            aria-current={page === "ports" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "ports")}
           >
-            <Radio />
+            <Radio aria-hidden="true" />
             Ports
-          </button>
-          <button
-            className={page === "discover" ? "active" : ""}
-            onClick={() => nav("discover")}
+          </a>
+          <a
+            href={navHref("activity")}
+            className={page === "activity" ? "active" : ""}
+            aria-current={page === "activity" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "activity")}
           >
-            <FolderOpen />
-            Discover apps
-          </button>
-          <button
+            <Activity aria-hidden="true" />
+            Activity
+          </a>
+          <div className="nav-separator" />
+          <a
+            href={navHref("config")}
             className={page === "config" ? "active" : ""}
-            onClick={() => nav("config")}
+            aria-current={page === "config" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "config")}
           >
-            <FileCode2 />
+            <FileCode2 aria-hidden="true" />
             Configuration
-          </button>
-          <button
+          </a>
+          <a
+            href={navHref("system")}
             className={page === "system" ? "active" : ""}
-            onClick={() => nav("system")}
+            aria-current={page === "system" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "system")}
           >
-            <Server />
+            <Server aria-hidden="true" />
             System
-          </button>
+          </a>
         </nav>
-        <div className="sidebar-bottom">
-          <div className="theme-switch" role="group" aria-label="Color theme">
-            {[
-              ["light", Sun],
-              ["dark", Moon],
-              ["system", Monitor],
-            ].map(([t, Icon]) => (
-              <button
-                key={String(t)}
-                title={`${t} theme`}
-                aria-label={`${t} theme`}
-                aria-pressed={theme === t}
-                className={theme === t ? "selected" : ""}
-                onClick={() => setTheme(String(t))}
-              >
-                {React.createElement(Icon, { size: 15 })}
-              </button>
-            ))}
-          </div>
-          <div className="connection">
-            <span className={`connection-dot ${connected ? "online" : ""}`} />
-            <span>{connected ? "Controller connected" : "Reconnecting…"}</span>
-            <Radio size={13} />
-          </div>
-          <div className="local-note">Your machine. Your services.</div>
-        </div>
       </aside>
       <div className="workspace">
         <header className="topbar">
           <div className="breadcrumb">
             <IconButton
               label="Toggle navigation"
+              ref={navTrigger}
+              aria-expanded={mobileNav}
+              aria-controls="primary-navigation"
               onClick={() => setMobileNav(!mobileNav)}
             >
-              <Menu size={17} />
+              <Menu size={17} aria-hidden="true" />
             </IconButton>
-            <span>Workspace</span>
-            <ChevronRight size={14} />
             <strong>
               {
                 (
                   {
-                    dashboard: "Overview",
+                    dashboard: "Applications",
                     activity: "Activity",
                     config: "Configuration",
                     discover: "Discover apps",
@@ -458,30 +651,52 @@ function AppShell() {
             </strong>
           </div>
           <div className="topbar-right">
-            <span className="host-label">
-              <Monitor size={13} /> Local machine
+            <span
+              className={`connection ${connected ? "online" : ""}`}
+              role="status"
+            >
+              <span className={`connection-dot ${connected ? "online" : ""}`} />
+              <span className="connection-full">
+                {connected ? "Controller connected" : "Reconnecting…"}
+              </span>
+              <span className="connection-short">
+                {connected ? "Connected" : "Reconnecting"}
+              </span>
             </span>
-            <IconButton label="Reload configuration" onClick={reload}>
-              <RefreshCw size={15} />
-            </IconButton>
+            <select
+              className="theme-select"
+              aria-label="Color theme"
+              name="color-theme"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+            >
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
           </div>
         </header>
-        <main>
+        <main
+          ref={mainRef}
+          id="main-content"
+          tabIndex={-1}
+          className={`${page === "dashboard" ? "overview-page" : `${page}-page`} workstation-page`}
+        >
           {error && (
             <div className="alert error" role="alert">
-              <AlertCircle size={18} />
+              <AlertCircle size={18} aria-hidden="true" />
               <div>
                 <strong>Something needs attention</strong>
                 <pre>{error}</pre>
               </div>
               <IconButton label="Dismiss error" onClick={() => setError("")}>
-                <X size={16} />
+                <X size={16} aria-hidden="true" />
               </IconButton>
             </div>
           )}
           {cfg?.error && (
             <div className="alert warning" role="alert">
-              <AlertCircle size={18} />
+              <AlertCircle size={18} aria-hidden="true" />
               <div>
                 <strong>Configuration could not reload</strong>
                 <p>{cfg.error}</p>
@@ -493,122 +708,77 @@ function AppShell() {
           )}
           {page === "dashboard" && (
             <>
-              <div className="page-heading">
-                <div>
-                  <h1>{favorites ? "Favorites" : "Overview"}</h1>
-                  <p>Everything you run, in one place.</p>
-                </div>
-                <div className="heading-actions">
-                  <button className="button" onClick={() => nav("discover")}>
-                    <Plus size={15} />
-                    Add application
-                  </button>
-                  <Dropdown.Root>
-                    <Dropdown.Trigger asChild>
-                      <button
-                        className="button primary"
-                        disabled={busy.has("global")}
-                      >
-                        {busy.has("global") ? (
-                          <LoaderCircle className="spin" size={15} />
-                        ) : (
-                          <Play size={14} />
-                        )}
-                        Workspace actions
-                        <ChevronRight className="rotate-down" size={14} />
-                      </button>
-                    </Dropdown.Trigger>
-                    <Dropdown.Portal>
-                      <Dropdown.Content className="dropdown" align="end">
-                        <Dropdown.Item onSelect={() => globalAction("start")}>
-                          <Play />
-                          Start all
-                        </Dropdown.Item>
-                        <Dropdown.Item onSelect={() => globalAction("restart")}>
-                          <RefreshCw />
-                          Restart running
-                        </Dropdown.Item>
-                        <Dropdown.Separator />
-                        <Dropdown.Item
-                          className="danger"
-                          onSelect={() =>
-                            setConfirm({
-                              title: "Stop all applications?",
-                              message:
-                                "This stops all included applications. Configured exclusions and externally detected processes are protected.",
-                              run: () => globalAction("stop"),
-                            })
-                          }
+              <PageHeader
+                title="Applications"
+                actions={
+                  <>
+                    <button className="button" onClick={() => nav("discover")}>
+                      <Plus size={15} aria-hidden="true" />
+                      Discover apps
+                    </button>
+                    <Dropdown.Root>
+                      <Dropdown.Trigger asChild>
+                        <button
+                          className="button"
+                          disabled={busy.has("global")}
                         >
-                          <Square />
-                          Stop all
-                        </Dropdown.Item>
-                      </Dropdown.Content>
-                    </Dropdown.Portal>
-                  </Dropdown.Root>
-                </div>
-              </div>
-              <div className="summary" aria-label="Application summary">
-                {[
-                  {
-                    name: "Configured",
-                    count: apps.length,
-                    state: "configured",
-                  },
-                  {
-                    name: "Running",
-                    count: apps.filter((a) => isActive(a.runtime.state)).length,
-                    state: "running",
-                  },
-                  {
-                    name: "Healthy",
-                    count: apps.filter((a) => a.runtime.health === "healthy")
-                      .length,
-                    state: "healthy",
-                  },
-                  {
-                    name: "Needs attention",
-                    count: apps.filter((a) =>
-                      ["unhealthy", "failed", "unknown"].includes(
-                        a.runtime.state,
-                      ),
-                    ).length,
-                    state: "unhealthy",
-                  },
-                  {
-                    name: "Stopped",
-                    count: apps.filter((a) => a.runtime.state === "stopped")
-                      .length,
-                    state: "stopped",
-                  },
-                ].map((s) => (
-                  <button
-                    key={s.name}
-                    onClick={() =>
-                      setStatus(
-                        s.state === "configured"
-                          ? ""
-                          : s.state === "running"
-                            ? "active"
-                            : s.state === "unhealthy"
-                              ? "attention"
-                              : s.state,
-                      )
-                    }
-                  >
-                    <span className={`summary-indicator ${s.state}`} />
-                    <strong>{s.count}</strong>
-                    <span>{s.name}</span>
-                  </button>
-                ))}
-              </div>
+                          {busy.has("global") ? (
+                            <LoaderCircle
+                              className="spin"
+                              size={15}
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Play size={14} aria-hidden="true" />
+                          )}
+                          Workspace actions
+                          <ChevronRight
+                            className="rotate-down"
+                            size={14}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </Dropdown.Trigger>
+                      <Dropdown.Portal>
+                        <Dropdown.Content className="dropdown" align="end">
+                          <Dropdown.Item onSelect={() => globalAction("start")}>
+                            <Play aria-hidden="true" />
+                            Start all
+                          </Dropdown.Item>
+                          <Dropdown.Item
+                            onSelect={() => globalAction("restart")}
+                          >
+                            <RefreshCw aria-hidden="true" />
+                            Restart running
+                          </Dropdown.Item>
+                          <Dropdown.Separator />
+                          <Dropdown.Item
+                            className="danger"
+                            onSelect={() =>
+                              setConfirm({
+                                title: "Stop all applications?",
+                                message:
+                                  "This stops all included applications. Configured exclusions and externally detected processes are protected.",
+                                actionLabel: "Stop all",
+                                run: () => globalAction("stop"),
+                              })
+                            }
+                          >
+                            <Square aria-hidden="true" />
+                            Stop all
+                          </Dropdown.Item>
+                        </Dropdown.Content>
+                      </Dropdown.Portal>
+                    </Dropdown.Root>
+                  </>
+                }
+              />
               {Object.keys(cfg?.profiles || {}).length > 0 && (
                 <section className="profiles-section">
-                  <div className="section-heading">
+                  <div className="workstation-section-heading">
                     <h2>Profiles</h2>
-                    <span>Start a whole environment together</span>
                   </div>
-                  <div className="profiles">
+                  <div className="profiles workstation-list">
                     {Object.entries(cfg!.profiles).map(([id, p]) => (
                       <ProfileCard
                         key={id}
@@ -622,34 +792,64 @@ function AppShell() {
                   </div>
                 </section>
               )}
-              <section className="applications">
-                <div className="section-heading">
-                  <h2>
-                    Applications{" "}
-                    <span className="count">{filtered.length}</span>
-                  </h2>
-                  <span>Live status</span>
-                </div>
-                <div className="filterbar">
-                  <label className="search-field">
-                    <Search size={16} />
-                    <input
-                      aria-label="Search applications"
-                      placeholder="Search applications…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                    {search && (
-                      <button
-                        aria-label="Clear search"
-                        onClick={() => setSearch("")}
-                      >
-                        <X size={14} />
-                      </button>
+              <section className="applications" aria-label="Application list">
+                <h2 className="sr-only">Application groups</h2>
+                <div
+                  className="workstation-toolbar"
+                  role="group"
+                  aria-label="Application filters"
+                >
+                  <div className="overview-list-summary">
+                    <strong>
+                      {filtered.length === apps.length
+                        ? apps.length
+                        : `${numberFormat.format(filtered.length)} of ${numberFormat.format(apps.length)}`}{" "}
+                      {apps.length === 1 ? "application" : "applications"}
+                    </strong>
+                    <span>
+                      {numberFormat.format(
+                        filtered.filter((a) => isActive(a.runtime.state))
+                          .length,
+                      )}{" "}
+                      running
+                    </span>
+                    {filtered.some((a) =>
+                      ["unhealthy", "failed", "unknown"].includes(
+                        a.runtime.state,
+                      ),
+                    ) && (
+                      <span className="attention-count">
+                        {
+                          filtered.filter((a) =>
+                            ["unhealthy", "failed", "unknown"].includes(
+                              a.runtime.state,
+                            ),
+                          ).length
+                        }{" "}
+                        need attention
+                      </span>
                     )}
-                  </label>
+                  </div>
+                  <button
+                    className="favorites-filter"
+                    aria-label="Filter favorites"
+                    aria-pressed={favorites}
+                    onClick={() => setFavorites(!favorites)}
+                  >
+                    <Star size={14} aria-hidden="true" />{" "}
+                    <span>{pinned.size}</span>
+                  </button>
+                  <SearchField
+                    label="Search applications"
+                    name="application-search"
+                    placeholder="Search applications…"
+                    value={search}
+                    onChange={setSearch}
+                    onClear={() => setSearch("")}
+                  />
                   <select
                     aria-label="Filter group"
+                    name="application-group"
                     value={group}
                     onChange={(e) => setGroup(e.target.value)}
                   >
@@ -664,17 +864,18 @@ function AppShell() {
                   </select>
                   <select
                     aria-label="Filter status"
+                    name="application-status"
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
                   >
-                    <option value="">All statuses</option>
+                    <option value="">Status</option>
                     {[
                       "active",
                       "attention",
+                      "stopped",
                       "healthy",
                       "running",
                       "unhealthy",
-                      "stopped",
                       "external",
                       "failed",
                       "unknown",
@@ -688,6 +889,7 @@ function AppShell() {
                   </select>
                   <select
                     aria-label="Filter type"
+                    name="application-type"
                     value={type}
                     onChange={(e) => setType(e.target.value)}
                   >
@@ -703,43 +905,40 @@ function AppShell() {
                 </div>
                 {loading ? (
                   <div className="loading">
-                    <LoaderCircle className="spin" />
-                    Connecting to your workspace…
+                    <LoaderCircle className="spin" aria-hidden="true" />
+                    Connecting to controller…
                   </div>
                 ) : apps.length === 0 ? (
                   <div className="onboarding">
-                    <div className="onboarding-icon">
-                      <Terminal size={28} />
-                    </div>
-                    <h2>A home for everything you run.</h2>
+                    <h2>No applications configured</h2>
                     <p>
-                      Add your first application to start, stop, and monitor it
-                      here. Stakl keeps the commands so you don’t have to.
+                      Discover a local project or add an application in your
+                      configuration file.
                     </p>
                     <div className="onboarding-actions">
                       <button
                         className="button primary"
                         onClick={() => nav("discover")}
                       >
-                        <FolderOpen size={16} />
-                        Discover local projects
+                        <FolderOpen size={16} aria-hidden="true" />
+                        Discover apps
                       </button>
                       <button className="button" onClick={() => nav("config")}>
-                        <FileCode2 size={16} />
+                        <FileCode2 size={16} aria-hidden="true" />
                         Edit configuration
                       </button>
                     </div>
                     <div className="config-location">
-                      <Folder size={14} />
+                      <Folder size={14} aria-hidden="true" />
                       <code>{cfg?.path}</code>
-                    </div>
-                    <div className="onboarding-footnote">
-                      Processes stay running when Stakl closes. Your YAML
-                      stays yours.
                     </div>
                   </div>
                 ) : filtered.length === 0 ? (
-                  <Empty icon={Search} title="No matching applications">
+                  <EmptyState
+                    icon={Search}
+                    title="No matching applications"
+                    plain
+                  >
                     <p>Try another search or clear your filters.</p>
                     <button
                       className="button"
@@ -753,24 +952,37 @@ function AppShell() {
                     >
                       Clear filters
                     </button>
-                  </Empty>
+                  </EmptyState>
                 ) : (
-                  groups.map(([id, g]) => {
-                    const rows = filtered.filter((a) => a.config.group === id);
-                    return (
-                      rows.length > 0 && (
-                        <div className="app-group" key={id}>
-                          <div className="group-heading">
-                            <Folder size={15} />
-                            <h3>{g.name}</h3>
-                            <span>{rows.length}</span>
-                          </div>
-                          <div className="app-table">
-                            <div className="table-head">
-                              <span>APPLICATION</span>
-                              <span>STATUS</span>
-                              <span>RUNTIME</span>
-                              <span>ACTIONS</span>
+                  <div className="app-ledger workstation-list">
+                    <div
+                      className="table-head workstation-ledger-grid"
+                      aria-hidden="true"
+                    >
+                      <span>Application</span>
+                      <span>State</span>
+                      <span>Runtime</span>
+                      <span>Actions</span>
+                    </div>
+                    {groups.map(([id, g]) => {
+                      const rows = filtered.filter(
+                        (a) => a.config.group === id,
+                      );
+                      return (
+                        rows.length > 0 && (
+                          <section
+                            className="app-group"
+                            key={id}
+                            aria-label={`${g.name} applications`}
+                          >
+                            <div className="group-heading">
+                              <h3>{g.name}</h3>
+                              <span>
+                                {numberFormat.format(rows.length)}{" "}
+                                {rows.length === 1
+                                  ? "application"
+                                  : "applications"}
+                              </span>
                             </div>
                             {rows
                               .sort(
@@ -790,24 +1002,13 @@ function AppShell() {
                                   onOpen={(tab) => openDetail(a.config.id, tab)}
                                 />
                               ))}
-                          </div>
-                        </div>
-                      )
-                    );
-                  })
+                          </section>
+                        )
+                      );
+                    })}
+                  </div>
                 )}
               </section>
-              <div className="dashboard-footer">
-                <span>
-                  <span className="connection-dot online" /> Changes appear
-                  automatically
-                </span>
-                <button onClick={() => nav("config")}>
-                  <FileCode2 size={13} />
-                  YAML is the source of truth
-                  <ArrowUpRight size={13} />
-                </button>
-              </div>
             </>
           )}
           {page === "config" && (
@@ -815,6 +1016,7 @@ function AppShell() {
               cfg={cfg}
               refresh={refresh}
               onError={setError}
+              onDirtyChange={setConfigDirty}
               onNotice={(message) => {
                 setError("");
                 setNotice(message);
@@ -826,19 +1028,15 @@ function AppShell() {
               cfg={cfg}
               onAdded={() => {
                 refresh();
-                nav("dashboard");
+                nav("dashboard", true);
               }}
               onError={setError}
+              onDirtyChange={setDiscoverDirty}
             />
           )}
           {page === "activity" && (
             <>
-              <div className="page-heading">
-                <div>
-                  <h1>Activity</h1>
-                  <p>Starts, stops, recovery, and everything in between.</p>
-                </div>
-              </div>
+              <PageHeader title="Activity" />
               <Timeline />
             </>
           )}
@@ -846,18 +1044,21 @@ function AppShell() {
           {page === "ports" && <PortsPage apps={apps} {...ports} />}
         </main>
       </div>
-      <Dialog.Root
-        open={!!selected}
-        onOpenChange={(o) => !o && setSelected(null)}
-      >
+      <Dialog.Root open={!!selected} onOpenChange={(o) => !o && closeDetail()}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="detail-panel" aria-describedby={undefined}>
+          <Dialog.Content
+            className="detail-panel workstation-detail"
+            aria-describedby={undefined}
+          >
             {current ? (
               <>
                 <div className="detail-header">
                   <div className="app-symbol">
-                    {React.createElement(appIcon(current.config), { size: 23 })}
+                    {React.createElement(appIcon(current.config), {
+                      size: 23,
+                      "aria-hidden": true,
+                    })}
                   </div>
                   <div>
                     <Dialog.Title>{current.config.name}</Dialog.Title>
@@ -867,17 +1068,18 @@ function AppShell() {
                       {current.config.id}
                     </span>
                   </div>
-                  <Dialog.Close asChild>
-                    <IconButton label="Close application details">
-                      <X size={20} />
-                    </IconButton>
-                  </Dialog.Close>
+                  <IconButton
+                    label="Close application details"
+                    onClick={closeDetail}
+                  >
+                    <X size={20} aria-hidden="true" />
+                  </IconButton>
                 </div>
                 <Detail
                   app={current}
                   portScan={ports}
                   tab={detailTab}
-                  setTab={setDetailTab}
+                  setTab={changeDetailTab}
                   run={run}
                   busy={busy.has(current.config.id)}
                   confirm={(run) =>
@@ -885,13 +1087,24 @@ function AppShell() {
                       title: "Force kill application?",
                       message:
                         "Immediately kills the owned process group. Unsaved work in that application may be lost.",
+                      actionLabel: "Force kill",
                       run,
                     })
                   }
                 />
               </>
             ) : (
-              <Dialog.Title>Application unavailable</Dialog.Title>
+              <div className="detail-header">
+                <Dialog.Title>
+                  {loading ? "Loading application" : "Application unavailable"}
+                </Dialog.Title>
+                <IconButton
+                  label="Close application details"
+                  onClick={closeDetail}
+                >
+                  <X size={20} aria-hidden="true" />
+                </IconButton>
+              </div>
             )}
           </Dialog.Content>
         </Dialog.Portal>
@@ -900,8 +1113,16 @@ function AppShell() {
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content
+            ref={paletteContentRef}
             className="palette-dialog"
+            tabIndex={-1}
             aria-describedby={undefined}
+            onOpenAutoFocus={(event) => {
+              if (isNarrow) {
+                event.preventDefault();
+                paletteContentRef.current?.focus();
+              }
+            }}
           >
             <Dialog.Title className="sr-only">Command palette</Dialog.Title>
             <Palette
@@ -925,7 +1146,7 @@ function AppShell() {
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content className="confirm-dialog">
-            <AlertCircle className="danger" />
+            <AlertCircle className="danger" aria-hidden="true" />
             <Dialog.Title>{confirm?.title}</Dialog.Title>
             <Dialog.Description>{confirm?.message}</Dialog.Description>
             <div className="dialog-actions">
@@ -939,7 +1160,7 @@ function AppShell() {
                   setConfirm(null);
                 }}
               >
-                Confirm
+                {confirm?.actionLabel}
               </button>
             </div>
           </Dialog.Content>
@@ -947,13 +1168,13 @@ function AppShell() {
       </Dialog.Root>
       {notice && (
         <div className="toast" role="status">
-          <CheckCircle2 size={17} />
+          <CheckCircle2 size={17} aria-hidden="true" />
           {notice}
           <IconButton
             label="Dismiss notification"
             onClick={() => setNotice("")}
           >
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </IconButton>
         </div>
       )}
@@ -975,48 +1196,55 @@ function ProfileCard({
 }) {
   const s = profileState(profile, apps);
   return (
-    <article className="profile-card">
-      <div className="profile-title">
-        <span className="profile-icon">
-          <Layers3 size={17} />
-        </span>
-        <h3>{profile.name}</h3>
-        <span className={`profile-state ${s.failed ? "danger" : ""}`}>
-          {s.running === 0 ? "Stopped" : `${s.running}/${s.total} running`}
-        </span>
+    <article className="profile-row workstation-list-row">
+      <div className="profile-identity">
+        <details className="profile-members">
+          <summary>
+            <span>{profile.name}</span>
+            <ChevronRight size={14} aria-hidden="true" />
+          </summary>
+          <p>
+            {profile.apps
+              .map(
+                (id) => apps.find((a) => a.config.id === id)?.config.name || id,
+              )
+              .join(", ")}
+          </p>
+        </details>
       </div>
-      <p>
-        {profile.apps
-          .map((id) => apps.find((a) => a.config.id === id)?.config.name || id)
-          .join(" · ")}
-      </p>
-      <div className="profile-footer">
-        <span>{s.total} applications</span>
-        <div>
-          {s.running > 0 && (
-            <IconButton
-              label={`Restart ${profile.name}`}
-              disabled={busy}
-              onClick={() => run(id, "restart", true)}
-            >
-              <RefreshCw size={14} />
-            </IconButton>
-          )}
-          <button
-            className="button small"
+      <span className={`profile-state ${s.failed ? "danger" : ""}`}>
+        {s.failed ? (
+          <AlertCircle size={13} aria-hidden="true" />
+        ) : (
+          <span className={`status-dot ${s.running ? "online" : ""}`} />
+        )}
+        {s.running === 0 ? "Stopped" : `${s.running}/${s.total} running`}
+      </span>
+      <div className="profile-actions workstation-action-row">
+        {s.running > 0 && (
+          <IconButton
+            label={`Restart ${profile.name}`}
             disabled={busy}
-            onClick={() => run(id, s.running ? "stop" : "start", true)}
+            onClick={() => run(id, "restart", true)}
           >
-            {busy ? (
-              <LoaderCircle className="spin" size={13} />
-            ) : s.running ? (
-              <Square size={12} />
-            ) : (
-              <Play size={12} />
-            )}{" "}
-            {s.running ? "Stop" : "Start"}
-          </button>
-        </div>
+            <RefreshCw size={14} aria-hidden="true" />
+          </IconButton>
+        )}
+        <button
+          className={`button small ${s.running ? "" : "primary"}`}
+          aria-label={`${s.running ? "Stop" : "Start"} ${profile.name} profile`}
+          disabled={busy}
+          onClick={() => run(id, s.running ? "stop" : "start", true)}
+        >
+          {busy ? (
+            <LoaderCircle className="spin" size={13} aria-hidden="true" />
+          ) : s.running ? (
+            <Square size={12} aria-hidden="true" />
+          ) : (
+            <Play size={12} aria-hidden="true" />
+          )}{" "}
+          {s.running ? "Stop" : "Start"}
+        </button>
       </div>
     </article>
   );
@@ -1037,38 +1265,45 @@ function AppRow({
   onOpen: (tab?: string) => void;
 }) {
   const active = isActive(a.runtime.state),
-    external = a.runtime.state === "external",
-    canStop =
-      !external || (a.config.type === "custom" && !!a.config.stop.command);
+    canStop = canStopApp(a);
   const link = Object.values(a.config.links || {})[0];
   return (
-    <div className="app-row">
+    <div
+      className="app-row workstation-list-row workstation-ledger-grid"
+      role="group"
+      aria-label={`${a.config.name} application`}
+    >
       <div className="app-identity">
         <div
           className={`app-symbol ${a.config.type === "docker-compose" ? "compose-symbol" : ""}`}
         >
-          {React.createElement(appIcon(a.config), { size: 20 })}
+          {React.createElement(appIcon(a.config), {
+            size: 17,
+            "aria-hidden": true,
+          })}
         </div>
         <div className="app-name">
           <button onClick={() => onOpen()}>
-            {a.config.name}
-            {pinned && <Pin size={11} />}
+            <span className="app-name-label">{a.config.name}</span>
+            {pinned && <Pin size={11} aria-hidden="true" />}
           </button>
           <span>
             {a.config.description || typeLabel(a.config.type)}
             {a.config.autostart.enabled && (
-              <span className="autostart">Auto</span>
+              <span className="autostart">Autostart</span>
             )}
           </span>
         </div>
       </div>
       <div>
-        <StatusBadge status={a.runtime.state} />
+        <span className="sr-only">State: </span>
+        <StatusIndicator status={a.runtime.state} plain />
         {a.runtime.next_restart && (
           <small className="retry-note">Retry scheduled</small>
         )}
       </div>
       <div className="runtime-cell">
+        <span className="sr-only">Runtime: </span>
         <span>
           {a.runtime.pid
             ? `PID ${a.runtime.pid}`
@@ -1076,74 +1311,78 @@ function AppRow({
               ? "Compose project"
               : "-"}
         </span>
-      </div>
-      <div className="row-actions">
-        {link && (
-          <a
-            href={link}
-            target="_blank"
-            rel="noreferrer"
-            className="icon-button"
-            aria-label={`Open ${a.config.name}`}
-            title="Open app"
-          >
-            <ArrowUpRight size={17} />
-          </a>
+        {active && (
+          <small>
+            {a.runtime.owned
+              ? "Owned by Stakl"
+              : external
+                ? "External process"
+                : "Active"}
+          </small>
         )}
+      </div>
+      <div className="row-actions workstation-action-row">
         <IconButton
           label={`Logs for ${a.config.name}`}
           onClick={() => onOpen("Logs")}
         >
-          <Terminal size={16} />
+          <Terminal size={16} aria-hidden="true" />
         </IconButton>
-        {active && canStop && (
-          <IconButton
-            label={`Restart ${a.config.name}`}
-            disabled={busy}
-            onClick={() => run(a.config.id, "restart")}
+        {(!active || canStop) && (
+          <button
+            className={`button small ${!active ? "start-button" : ""}`}
+            aria-label={`${active ? "Stop" : "Start"} ${a.config.name}`}
+            disabled={busy || a.runtime.state === "unknown"}
+            onClick={() => run(a.config.id, active ? "stop" : "start")}
           >
-            <RefreshCw size={15} />
-          </IconButton>
+            {busy ? (
+              <LoaderCircle className="spin" size={13} aria-hidden="true" />
+            ) : active ? (
+              <Square size={12} aria-hidden="true" />
+            ) : (
+              <Play size={12} aria-hidden="true" />
+            )}
+            <span>{active ? "Stop" : "Start"}</span>
+          </button>
         )}
-        <button
-          className={`button small ${!active ? "start-button" : ""}`}
-          disabled={
-            busy || (active && !canStop) || a.runtime.state === "unknown"
-          }
-          onClick={() => run(a.config.id, active ? "stop" : "start")}
-        >
-          {busy ? (
-            <LoaderCircle className="spin" size={13} />
-          ) : active ? (
-            <Square size={12} />
-          ) : (
-            <Play size={12} />
-          )}
-          <span>{active ? "Stop" : "Start"}</span>
-        </button>
         <Dropdown.Root>
           <Dropdown.Trigger asChild>
             <IconButton label={`More actions for ${a.config.name}`}>
-              <MoreHorizontal size={17} />
+              <MoreHorizontal size={17} aria-hidden="true" />
             </IconButton>
           </Dropdown.Trigger>
           <Dropdown.Portal>
             <Dropdown.Content className="dropdown" align="end">
               <Dropdown.Item onSelect={() => onOpen()}>
-                <Activity />
+                <Activity aria-hidden="true" />
                 More info
               </Dropdown.Item>
+              {active && canStop && (
+                <Dropdown.Item
+                  onSelect={() => run(a.config.id, "restart")}
+                  disabled={busy}
+                >
+                  <RefreshCw aria-hidden="true" /> Restart
+                </Dropdown.Item>
+              )}
+              {link && (
+                <Dropdown.Item asChild>
+                  <a href={link} target="_blank" rel="noreferrer">
+                    <ArrowUpRight aria-hidden="true" /> Open app
+                  </a>
+                </Dropdown.Item>
+              )}
               <Dropdown.Item onSelect={onPin}>
-                <Star />
+                <Star aria-hidden="true" />
                 {pinned ? "Unpin" : "Pin to favorites"}
               </Dropdown.Item>
               <Dropdown.Separator />
               <Dropdown.Item onSelect={() => run(a.config.id, "directory")}>
-                <FolderOpen />
+                <FolderOpen aria-hidden="true" />
                 Open directory
               </Dropdown.Item>
               <Dropdown.Item onSelect={() => run(a.config.id, "terminal")}>
-                <Terminal />
+                <Terminal aria-hidden="true" />
                 Open terminal here
               </Dropdown.Item>
             </Dropdown.Content>
@@ -1172,12 +1411,11 @@ function Detail({
 }) {
   const active = isActive(a.runtime.state);
   const portList = servicePorts(a, portScan.scan?.ports || []);
-  const canStop =
-    a.runtime.owned || (a.config.type === "custom" && a.config.stop.command);
+  const canStop = canStopApp(a);
   return (
     <>
       <div className="detail-status">
-        <StatusBadge status={a.runtime.state} />
+        <StatusIndicator status={a.runtime.state} plain />
         <span>
           {a.runtime.owned
             ? "Managed by Stakl"
@@ -1188,18 +1426,18 @@ function Detail({
       </div>
       <div className="detail-actions">
         <button
-          className="button primary"
+          className={`button${active ? "" : " primary"}`}
           disabled={
             busy || (active && !canStop) || a.runtime.state === "unknown"
           }
           onClick={() => run(a.config.id, active ? "stop" : "start")}
         >
           {busy ? (
-            <LoaderCircle className="spin" size={15} />
+            <LoaderCircle className="spin" size={15} aria-hidden="true" />
           ) : active ? (
-            <Square size={13} />
+            <Square size={13} aria-hidden="true" />
           ) : (
-            <Play size={13} />
+            <Play size={13} aria-hidden="true" />
           )}{" "}
           {active ? "Stop" : "Start"}
         </button>
@@ -1208,7 +1446,7 @@ function Detail({
           disabled={busy || (active && !canStop)}
           onClick={() => run(a.config.id, "restart")}
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={14} aria-hidden="true" />
           Restart
         </button>
         {Object.entries(a.config.links || {}).map(([name, url]) => (
@@ -1220,7 +1458,7 @@ function Detail({
             rel="noreferrer"
           >
             {name}
-            <ArrowUpRight size={14} />
+            <ArrowUpRight size={14} aria-hidden="true" />
           </a>
         ))}
       </div>
@@ -1274,7 +1512,7 @@ function Detail({
       >
         {a.runtime.error && (
           <div className="alert error">
-            <AlertCircle size={17} />
+            <AlertCircle size={17} aria-hidden="true" />
             <pre>{a.runtime.error}</pre>
           </div>
         )}
@@ -1283,7 +1521,7 @@ function Detail({
             {a.config.description && (
               <p className="detail-description">{a.config.description}</p>
             )}
-            <dl className="properties">
+            <dl className="properties workstation-properties">
               {Object.entries({
                 Ownership: a.runtime.owned
                   ? "Owned process"
@@ -1311,14 +1549,14 @@ function Detail({
                 className="button small"
                 onClick={() => run(a.config.id, "directory")}
               >
-                <FolderOpen size={14} />
+                <FolderOpen size={14} aria-hidden="true" />
                 Open directory
               </button>
               <button
                 className="button small"
                 onClick={() => run(a.config.id, "terminal")}
               >
-                <Terminal size={14} />
+                <Terminal size={14} aria-hidden="true" />
                 Open terminal here
               </button>
             </div>
@@ -1380,7 +1618,11 @@ function Detail({
               disabled={portScan.loading}
               onClick={portScan.refresh}
             >
-              <RefreshCw size={14} className={portScan.loading ? "spin" : ""} />
+              <RefreshCw
+                size={14}
+                className={portScan.loading ? "spin" : ""}
+                aria-hidden="true"
+              />
               {portScan.loading ? "Scanning…" : "Refresh ports"}
             </button>
             {a.containers.length > 0 && (
@@ -1389,9 +1631,9 @@ function Detail({
                 <div className="container-list">
                   {a.containers.map((c) => (
                     <div key={c.name}>
-                      <Box size={15} />
+                      <Box size={15} aria-hidden="true" />
                       <span>{c.name}</span>
-                      <StatusBadge status={c.health || c.state} />
+                      <StatusIndicator status={c.health || c.state} />
                     </div>
                   ))}
                 </div>
@@ -1418,7 +1660,7 @@ function Detail({
               )}
           </>
         )}
-        {tab === "Logs" && <LogViewer id={a.config.id} />}{" "}
+        {tab === "Logs" && <LogViewer id={a.config.id} active={active} />}{" "}
         {tab === "Health" && (
           <HealthHistory id={a.config.id} hasCheck={!!a.config.health.type} />
         )}{" "}
@@ -1438,7 +1680,26 @@ function Detail({
     </>
   );
 }
-function LogViewer({ id }: { id: string }) {
+const LogRow = React.memo(function LogRow({
+  line,
+  timestamps,
+}: {
+  line: LogLine;
+  timestamps: boolean;
+}) {
+  return (
+    <div className={`log-line ${line.stream}`}>
+      {timestamps && (
+        <time dateTime={line.time}>{logTime.format(new Date(line.time))}</time>
+      )}
+      <span className="stream-label">
+        {line.stream === "stderr" ? "ERR" : "OUT"}
+      </span>
+      <span>{line.text || " "}</span>
+    </div>
+  );
+});
+function LogViewer({ id, active }: { id: string; active: boolean }) {
   const [lines, setLines] = useState<LogLine[]>([]),
     [paused, setPaused] = useState(false),
     [follow, setFollow] = useState(true),
@@ -1455,6 +1716,8 @@ function LogViewer({ id }: { id: string }) {
   }, [paused]);
   useEffect(() => {
     setLines([]);
+    let pending: LogLine[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const es = new EventSource(
       `/api/apps/${encodeURIComponent(id)}/logs?follow=true`,
     );
@@ -1463,14 +1726,25 @@ function LogViewer({ id }: { id: string }) {
     es.onmessage = (e) => {
       if (!pausedRef.current) {
         try {
-          const line = JSON.parse(e.data);
-          setLines((l) => [...l, line].slice(-5000));
+          pending.push(JSON.parse(e.data) as LogLine);
+          if (!timer)
+            timer = setTimeout(() => {
+              const batch = pending;
+              pending = [];
+              timer = undefined;
+              setLines((l) => [...l, ...batch].slice(-5000));
+            }, 100);
         } catch {
-          setError("Could not decode log event");
+          setError(
+            "Could not read a log event. Reopen the application logs to reconnect.",
+          );
         }
       }
     };
-    return () => es.close();
+    return () => {
+      es.close();
+      clearTimeout(timer);
+    };
   }, [id]);
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
@@ -1480,26 +1754,20 @@ function LogViewer({ id }: { id: string }) {
       (!stream || l.stream === stream) &&
       l.text.toLowerCase().includes(search.toLowerCase()),
   );
-  const text = shown
-    .map(
-      (l) =>
-        `${timestamps ? new Date(l.time).toLocaleTimeString() + " " : ""}[${l.stream}] ${l.text}`,
-    )
-    .join("\n");
   return (
-    <div className="log-viewer">
+    <div className={`log-viewer${shown.length ? "" : " is-empty"}`}>
       <div className="log-toolbar">
-        <label className="search-field">
-          <Search size={14} />
-          <input
-            aria-label="Search logs"
-            placeholder="Search logs…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
+        <SearchField
+          label="Search logs"
+          name="log-search"
+          placeholder="Search logs…"
+          value={search}
+          onChange={setSearch}
+          iconSize={14}
+        />
         <select
           aria-label="Log stream"
+          name="log-stream"
           value={stream}
           onChange={(e) => setStream(e.target.value)}
         >
@@ -1515,28 +1783,32 @@ function LogViewer({ id }: { id: string }) {
             aria-pressed={paused}
             onClick={() => setPaused(!paused)}
           >
-            {paused ? <Play size={15} /> : <Pause size={15} />}
+            {paused ? (
+              <Play size={15} aria-hidden="true" />
+            ) : (
+              <Pause size={15} aria-hidden="true" />
+            )}
           </IconButton>
           <IconButton
             label="Follow tail"
             aria-pressed={follow}
             onClick={() => setFollow(!follow)}
           >
-            <ArrowDownToLine size={15} />
+            <ArrowDownToLine size={15} aria-hidden="true" />
           </IconButton>
           <IconButton
             label="Wrap lines"
             aria-pressed={wrap}
             onClick={() => setWrap(!wrap)}
           >
-            <WrapText size={15} />
+            <WrapText size={15} aria-hidden="true" />
           </IconButton>
           <IconButton
             label="Toggle timestamps"
             aria-pressed={timestamps}
             onClick={() => setTimestamps(!timestamps)}
           >
-            <Clock size={15} />
+            <Clock size={15} aria-hidden="true" />
           </IconButton>
         </div>
         <div>
@@ -1544,11 +1816,22 @@ function LogViewer({ id }: { id: string }) {
             label="Copy displayed logs"
             onClick={() =>
               navigator.clipboard
-                .writeText(text)
-                .catch((e) => setError(e.message))
+                .writeText(
+                  shown
+                    .map(
+                      (l) =>
+                        `${timestamps ? logTime.format(new Date(l.time)) + " " : ""}[${l.stream}] ${l.text}`,
+                    )
+                    .join("\n"),
+                )
+                .catch((e) =>
+                  setError(
+                    `Could not copy displayed logs: ${e.message}. Check clipboard permissions and try again.`,
+                  ),
+                )
             }
           >
-            <Copy size={15} />
+            <Copy size={15} aria-hidden="true" />
           </IconButton>
           <a
             className="icon-button"
@@ -1556,10 +1839,10 @@ function LogViewer({ id }: { id: string }) {
             aria-label="Download logs"
             title="Download logs"
           >
-            <ArrowDownToLine size={15} />
+            <ArrowDownToLine size={15} aria-hidden="true" />
           </a>
           <IconButton label="Clear display" onClick={() => setLines([])}>
-            <Trash2 size={15} />
+            <Trash2 size={15} aria-hidden="true" />
           </IconButton>
         </div>
       </div>
@@ -1572,51 +1855,60 @@ function LogViewer({ id }: { id: string }) {
       >
         {shown.length ? (
           shown.map((l) => (
-            <div
-              className={`log-line ${l.stream}`}
+            <LogRow
               key={`${l.launch}:${l.seq}`}
-            >
-              {timestamps && (
-                <time>{new Date(l.time).toLocaleTimeString("en-GB")}</time>
-              )}
-              <span className="stream-label">
-                {l.stream === "stderr" ? "ERR" : "OUT"}
-              </span>
-              <span>{l.text || " "}</span>
-            </div>
+              line={l}
+              timestamps={timestamps}
+            />
           ))
         ) : (
           <div className="log-empty">
             {lines.length
               ? "No lines match your filters."
-              : "Waiting for log output. Start the application to capture logs."}
+              : active
+                ? "Waiting for log output."
+                : "No log output yet. Start the application to capture logs."}
           </div>
         )}
       </div>
       <div className="log-footer">
         <span>
           <span
-            className={`connection-dot ${connected && !paused ? "online" : ""}`}
+            className={`connection-dot ${connected && active && !paused ? "online" : ""}`}
           />
           {paused
             ? "Paused (incoming lines skipped)"
-            : connected
-              ? "Live stream"
-              : "Reconnecting…"}
+            : !active && !lines.length
+              ? "Application stopped"
+              : connected
+                ? "Live stream"
+                : "Reconnecting…"}
         </span>
-        <span>{shown.length} lines · up to 5,000 in view</span>
+        <span>
+          {numberFormat.format(shown.length)} lines · up to{" "}
+          {numberFormat.format(5000)} in view
+        </span>
       </div>
     </div>
   );
 }
 function HealthHistory({ id, hasCheck }: { id: string; hasCheck: boolean }) {
   const [rows, setRows] = useState<Health[]>([]),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(true);
   useEffect(() => {
     const load = () =>
       request<Health[]>(`/apps/${id}/health`)
-        .then(setRows)
-        .catch((e) => setError(e.message));
+        .then((result) => {
+          setRows(result);
+          setError("");
+        })
+        .catch((e) =>
+          setError(
+            `Could not load health history: ${e.message}. Check the controller connection and reopen this application.`,
+          ),
+        )
+        .finally(() => setLoading(false));
     load();
     const es = new EventSource("/api/events");
     es.onmessage = load;
@@ -1624,9 +1916,9 @@ function HealthHistory({ id, hasCheck }: { id: string; hasCheck: boolean }) {
   }, [id]);
   if (!hasCheck)
     return (
-      <Empty icon={HeartPulse} title="No health check configured">
+      <EmptyState icon={HeartPulse} title="No health check configured" plain>
         <p>Add an HTTP, TCP, process, command, or Docker check in YAML.</p>
-      </Empty>
+      </EmptyState>
     );
   return (
     <>
@@ -1636,23 +1928,30 @@ function HealthHistory({ id, hasCheck }: { id: string; hasCheck: boolean }) {
       </p>
       {error && <p role="alert">{error}</p>}
       <div className="health-history">
+        {loading && !rows.length && (
+          <p role="status">Loading health history…</p>
+        )}
         {rows.map((r, i) => (
-          <div key={i}>
+          <div className={r.ok ? "" : "health-failed"} key={i}>
             <span className={`health-icon ${r.ok ? "success" : "danger"}`}>
-              {r.ok ? <Check size={15} /> : <X size={15} />}
+              {r.ok ? (
+                <Check size={15} aria-hidden="true" />
+              ) : (
+                <X size={15} aria-hidden="true" />
+              )}
             </span>
             <div>
               <strong>{r.ok ? "Check passed" : "Check failed"}</strong>
-              <small>{new Date(r.time).toLocaleString()}</small>
+              <time dateTime={r.time}>{new Date(r.time).toLocaleString()}</time>
               {r.message && <p>{r.message}</p>}
             </div>
-            <code>{r.latency.toFixed(1)} ms</code>
+            <code>{decimalFormat.format(r.latency)} ms</code>
           </div>
         ))}
-        {!rows.length && (
-          <Empty title="No checks yet">
+        {!rows.length && !loading && !error && (
+          <EmptyState title="No checks yet" plain headingLevel={4}>
             <p>Health history appears when the application is running.</p>
-          </Empty>
+          </EmptyState>
         )}
       </div>
     </>
@@ -1660,43 +1959,60 @@ function HealthHistory({ id, hasCheck }: { id: string; hasCheck: boolean }) {
 }
 function Timeline({ id }: { id?: string }) {
   const [rows, setRows] = useState<Event[]>([]),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(true);
   useEffect(() => {
     const load = () =>
       request<Event[]>(id ? `/apps/${id}/history` : "/history")
-        .then(setRows)
-        .catch((e) => setError(e.message));
+        .then((result) => {
+          setRows(result);
+          setError("");
+        })
+        .catch((e) =>
+          setError(
+            `Could not load activity: ${e.message}. Check the controller connection and try again.`,
+          ),
+        )
+        .finally(() => setLoading(false));
     load();
     const es = new EventSource("/api/events");
     es.onmessage = load;
     return () => es.close();
   }, [id]);
   return (
-    <div className="timeline">
+    <div className="timeline workstation-list">
       {error && <p role="alert">{error}</p>}
+      {loading && !rows.length && <p role="status">Loading activity…</p>}
       {rows.length ? (
         rows.map((r, i) => (
-          <div className="timeline-item" key={i}>
-            <span
-              className={`timeline-icon ${r.type.includes("failed") ? "danger" : ""}`}
-            >
-              <Activity size={15} />
-            </span>
+          <div
+            className={`timeline-item workstation-list-row${r.type.includes("failed") ? " is-failed" : ""}`}
+            key={i}
+          >
             <div>
               <strong>{r.message}</strong>
               <span>
-                {r.type}
+                {r.type === "app.health.changed"
+                  ? "Health result changed"
+                  : r.type === "app.healthy"
+                    ? "Entered healthy state"
+                    : r.type.replace(/^app\./, "").replaceAll(".", " ")}
                 {r.app ? ` · ${r.app}` : ""}
               </span>
             </div>
-            <time>{new Date(r.time).toLocaleString()}</time>
+            <time dateTime={r.time}>{new Date(r.time).toLocaleString()}</time>
           </div>
         ))
-      ) : (
-        <Empty icon={Activity} title="A quiet workspace">
+      ) : !loading && !error ? (
+        <EmptyState
+          icon={Activity}
+          title="A quiet workspace"
+          plain
+          headingLevel={id ? 3 : 2}
+        >
           <p>Application activity will appear here.</p>
-        </Empty>
-      )}
+        </EmptyState>
+      ) : null}
     </div>
   );
 }
@@ -1705,18 +2021,26 @@ function ConfigPage({
   refresh,
   onError,
   onNotice,
+  onDirtyChange,
 }: {
   cfg: Config | null;
   refresh: () => Promise<void>;
   onError: (s: string) => void;
   onNotice: (s: string) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [raw, setRaw] = useState<string | null>(null),
     [original, setOriginal] = useState(""),
     [revision, setRevision] = useState(""),
     [valid, setValid] = useState(false),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [validationError, setValidationError] = useState("");
+  const validationErrorRef = useRef<HTMLParagraphElement>(null);
   const dirty = raw !== null && raw !== original;
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (validationError) validationErrorRef.current?.focus();
+  }, [validationError]);
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
       if (dirty) {
@@ -1734,11 +2058,14 @@ function ConfigPage({
       setOriginal(c.raw || "");
       setRevision(c.revision || "");
     } catch (e) {
-      onError((e as Error).message);
+      onError(
+        `Could not reveal configuration: ${(e as Error).message}. Check that the configuration file is readable.`,
+      );
     }
   };
   const action = async (save: boolean) => {
     setBusy(true);
+    setValidationError("");
     try {
       const result = await request<{ revision?: string }>(
         `/config/${save ? "save" : "validate"}`,
@@ -1757,44 +2084,47 @@ function ConfigPage({
       );
     } catch (e) {
       setValid(false);
-      onError((e as Error).message);
+      setValidationError(
+        `Could not ${save ? "save" : "validate"} configuration: ${(e as Error).message}. Review the YAML and try again.`,
+      );
     } finally {
       setBusy(false);
     }
   };
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <h1>Configuration</h1>
-          <p>Human-readable YAML. Always under your control.</p>
-        </div>
-        <button
-          className="button"
-          onClick={() => {
-            request("/config/reload", {})
-              .then(() => {
-                refresh();
-                onNotice("Configuration reloaded");
-              })
-              .catch((e) => onError(e.message));
-          }}
-        >
-          <RefreshCw size={15} />
-          Reload from disk
-        </button>
-      </div>
+      <PageHeader
+        title="Configuration"
+        actions={
+          <button
+            className="button"
+            onClick={() => {
+              request("/config/reload", {})
+                .then(() => {
+                  refresh();
+                  onNotice("Configuration reloaded");
+                })
+                .catch((e) =>
+                  onError(
+                    `Could not reload configuration: ${e.message}. Check the YAML and retry.`,
+                  ),
+                );
+            }}
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+            Reload from disk
+          </button>
+        }
+      />
       <div className="config-banner">
-        <FileCode2 size={20} />
         <div>
           <strong>Configuration file</strong>
           <code>{cfg?.path}</code>
         </div>
-        <span className="tag">YAML · v1</span>
+        <span>YAML · v1</span>
       </div>
       {raw === null ? (
         <div className="editor-locked">
-          <FileCode2 size={30} />
           <h2>Edit your workspace</h2>
           <p>
             The editor displays your complete configuration, including any
@@ -1812,7 +2142,7 @@ function ConfigPage({
         <>
           <div className="editor-header">
             <span>
-              <FileCode2 size={14} />
+              <FileCode2 size={14} aria-hidden="true" />
               config.yml
               {dirty && <span className="unsaved">Unsaved changes</span>}
               {valid && !dirty && <span className="success">Valid</span>}
@@ -1823,7 +2153,7 @@ function ConfigPage({
                 onClick={() => action(false)}
                 disabled={busy}
               >
-                <CheckCircle2 size={14} />
+                <CheckCircle2 size={14} aria-hidden="true" />
                 Validate
               </button>
               <button
@@ -1832,9 +2162,9 @@ function ConfigPage({
                 disabled={busy || !dirty}
               >
                 {busy ? (
-                  <LoaderCircle className="spin" size={14} />
+                  <LoaderCircle className="spin" size={14} aria-hidden="true" />
                 ) : (
-                  <Check size={14} />
+                  <Check size={14} aria-hidden="true" />
                 )}
                 Save and reload
               </button>
@@ -1853,28 +2183,46 @@ function ConfigPage({
             />
             <textarea
               aria-label="YAML configuration editor"
+              name="configuration-yaml"
+              autoComplete="off"
+              aria-invalid={!!validationError}
+              aria-describedby={
+                validationError ? "config-validation-error" : undefined
+              }
               spellCheck={false}
               value={raw}
               onChange={(e) => {
                 setRaw(e.target.value);
                 setValid(false);
+                setValidationError("");
               }}
             />
           </div>
+          {validationError && (
+            <p
+              id="config-validation-error"
+              className="alert error"
+              role="alert"
+              tabIndex={-1}
+              ref={validationErrorRef}
+            >
+              {validationError}
+            </p>
+          )}
           <div className="editor-footer">
             <span>A backup is created before every save.</span>
-            <span>{raw.split("\n").length} lines</span>
+            <span>{numberFormat.format(raw.split("\n").length)} lines</span>
           </div>
         </>
       )}
-      <section className="config-help">
-        <h2>A small example</h2>
+      <details className="config-help">
+        <summary>Configuration example</summary>
         <p>
           Use an absolute path to a project that exists on your machine.
           Environment values stay redacted in application details.
         </p>
         <pre className="code-block">{`apps:\n  my-api:\n    name: My API\n    type: process\n    cwd: ~/Development/my-api\n    start:\n      command: npm run dev\n    health:\n      type: http\n      url: http://localhost:3000/health\n    ports:\n      - name: Web\n        port: 3000`}</pre>
-      </section>
+      </details>
     </>
   );
 }
@@ -1882,10 +2230,12 @@ function DiscoverPage({
   cfg,
   onAdded,
   onError,
+  onDirtyChange,
 }: {
   cfg: Config | null;
   onAdded: () => void;
   onError: (s: string) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [path, setPath] = useState(""),
     [rows, setRows] = useState<
@@ -1901,9 +2251,33 @@ function DiscoverPage({
     [scanned, setScanned] = useState(false),
     [truncated, setTruncated] = useState(false),
     [adding, setAdding] = useState<string | null>(null),
-    [draft, setDraft] = useState("");
+    [draft, setDraft] = useState(""),
+    [originalDraft, setOriginalDraft] = useState(""),
+    [scanError, setScanError] = useState(""),
+    [draftError, setDraftError] = useState("");
+  const scanErrorRef = useRef<HTMLParagraphElement>(null);
+  const draftErrorRef = useRef<HTMLParagraphElement>(null);
+  const draftDirty = !!adding && draft !== originalDraft;
+  useEffect(() => onDirtyChange(draftDirty), [draftDirty, onDirtyChange]);
+  useEffect(() => {
+    const guard = (event: BeforeUnloadEvent) => {
+      if (draftDirty) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, [draftDirty]);
+  useEffect(() => {
+    if (scanError) scanErrorRef.current?.focus();
+  }, [scanError]);
+  useEffect(() => {
+    if (draftError) draftErrorRef.current?.focus();
+  }, [draftError]);
   const scan = async () => {
     setBusy(true);
+    setScanError("");
     try {
       const d = await request<{ suggestions: typeof rows; truncated: boolean }>(
         "/discover",
@@ -1913,7 +2287,9 @@ function DiscoverPage({
       setScanned(true);
       setTruncated(d.truncated);
     } catch (e) {
-      onError((e as Error).message);
+      setScanError(
+        `Could not scan ${path}: ${(e as Error).message}. Check the directory path and permissions, then try again.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -1935,14 +2311,20 @@ function DiscoverPage({
       if (row.type === "docker-compose")
         app.docker = { compose_file: row.indicator, project_name: id };
       else app.start = { command: row.command };
-      setDraft(YAML.stringify({ [id]: app }));
+      const suggestion = YAML.stringify({ [id]: app });
+      setDraft(suggestion);
+      setOriginalDraft(suggestion);
+      setDraftError("");
       setAdding(row.path);
     } catch (e) {
-      onError((e as Error).message);
+      onError(
+        `Could not prepare ${row.name}: ${(e as Error).message}. Check that the configuration file is readable.`,
+      );
     }
   };
   const add = async () => {
     setBusy(true);
+    setDraftError("");
     try {
       const c = await request<Config>("/config?raw=true");
       const doc = YAML.parseDocument(c.raw || "");
@@ -1957,30 +2339,34 @@ function DiscoverPage({
       });
       onAdded();
     } catch (e) {
-      onError((e as Error).message);
+      setDraftError(
+        `Could not add application: ${(e as Error).message}. Review the YAML and try again.`,
+      );
     } finally {
       setBusy(false);
     }
   };
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <h1>Discover apps</h1>
-          <p>
-            Find projects on your machine. Choose what belongs in your
-            workspace.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Discover apps"
+        description="Find local projects and review them before adding."
+      />
       <div className="discovery-form">
-        <FolderOpen size={22} />
         <label>
           <span>Directory to scan</span>
           <input
-            placeholder="~/Development"
+            placeholder="e.g. ~/Projects or /Users/you/Projects"
+            name="directory-to-scan"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={!!scanError}
+            aria-describedby={scanError ? "discover-scan-error" : undefined}
             value={path}
-            onChange={(e) => setPath(e.target.value)}
+            onChange={(e) => {
+              setPath(e.target.value);
+              setScanError("");
+            }}
             onKeyDown={(e) => e.key === "Enter" && path && scan()}
           />
         </label>
@@ -1990,13 +2376,24 @@ function DiscoverPage({
           onClick={scan}
         >
           {busy ? (
-            <LoaderCircle className="spin" size={15} />
+            <LoaderCircle className="spin" size={15} aria-hidden="true" />
           ) : (
-            <Search size={15} />
+            <Search size={15} aria-hidden="true" />
           )}
           Scan directory
         </button>
       </div>
+      {scanError && (
+        <p
+          id="discover-scan-error"
+          className="alert error"
+          role="alert"
+          tabIndex={-1}
+          ref={scanErrorRef}
+        >
+          {scanError}
+        </p>
+      )}
       <p className="muted discovery-note">
         Looks up to four directory levels for Compose, Node.js, Rails, Python,
         Go, Rust, Justfile, and Makefile projects. Dependencies and hidden
@@ -2011,29 +2408,60 @@ function DiscoverPage({
           </p>
           <textarea
             aria-label="New application YAML"
+            name="new-application-yaml"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={!!draftError}
+            aria-describedby={draftError ? "discover-draft-error" : undefined}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setDraftError("");
+            }}
           />
+          {draftError && (
+            <p
+              id="discover-draft-error"
+              className="alert error"
+              role="alert"
+              tabIndex={-1}
+              ref={draftErrorRef}
+            >
+              {draftError}
+            </p>
+          )}
           <div className="inline-actions">
-            <button className="button" onClick={() => setAdding(null)}>
+            <button
+              className="button"
+              onClick={() => {
+                if (
+                  !draftDirty ||
+                  window.confirm("Discard your edited application draft?")
+                )
+                  setAdding(null);
+              }}
+            >
               Cancel
             </button>
             <button className="button primary" disabled={busy} onClick={add}>
-              <Plus size={15} />
+              <Plus size={15} aria-hidden="true" />
               Add to configuration
             </button>
           </div>
-          <small>Saved to {cfg?.path} with a backup.</small>
+          <small>
+            Adding this application saves to {cfg?.path} with a backup.
+          </small>
         </div>
-      ) : (
-        <div className="discovery-results">
+      ) : scanned || rows.length ? (
+        <div className="discovery-results workstation-list">
+          {rows.length > 0 && <h2 className="sr-only">Discovered projects</h2>}
           {rows.map((row) => (
-            <div className="discovery-row" key={row.path}>
+            <div className="discovery-row workstation-list-row" key={row.path}>
               <div className="app-symbol">
                 {row.type === "docker-compose" ? (
-                  <Box size={21} />
+                  <Box size={21} aria-hidden="true" />
                 ) : (
-                  <Terminal size={21} />
+                  <Terminal size={21} aria-hidden="true" />
                 )}
               </div>
               <div>
@@ -2045,26 +2473,23 @@ function DiscoverPage({
                 </span>
               </div>
               <button className="button small" onClick={() => prepare(row)}>
-                <Plus size={14} />
+                <Plus size={14} aria-hidden="true" />
                 Review & add
               </button>
             </div>
           ))}
           {!rows.length && (
-            <Empty
+            <EmptyState
               icon={FolderOpen}
-              title={
-                scanned
-                  ? "No supported projects found"
-                  : "Your next workspace starts here"
-              }
+              title="No supported projects found"
+              plain
+              headingLevel={2}
             >
               <p>
-                {scanned
-                  ? "Try a directory closer to your projects, or add applications directly in YAML."
-                  : "Select a directory to find local applications you can manage with Stakl."}
+                Try a directory closer to your projects, or add applications
+                directly in YAML.
               </p>
-            </Empty>
+            </EmptyState>
           )}
           {truncated && (
             <p className="alert warning">
@@ -2073,12 +2498,12 @@ function DiscoverPage({
             </p>
           )}
         </div>
-      )}
+      ) : null}
     </>
   );
 }
 function SystemPage() {
-  const [info, setInfo] = useState<Record<string, unknown>>({}),
+  const [info, setInfo] = useState<Record<string, unknown> | null>(null),
     [docker, setDocker] = useState<{
       available: boolean;
       message: string;
@@ -2093,79 +2518,106 @@ function SystemPage() {
       .then(([s, l]) => {
         setInfo(s);
         setLogs(l.text);
+        setError("");
       })
-      .catch((e) => setError(e.message));
+      .catch((e) =>
+        setError(
+          `Could not load system status: ${e.message}. Check the controller connection and refresh.`,
+        ),
+      );
   useEffect(() => {
     load();
   }, []);
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <h1>System</h1>
-          <p>The controller behind your workspace.</p>
-        </div>
-        <button className="button" onClick={load}>
-          <RefreshCw size={15} />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="System"
+        actions={
+          <button className="button" onClick={load}>
+            <RefreshCw size={15} aria-hidden="true" />
+            Refresh
+          </button>
+        }
+      />
       {error && (
         <p className="alert error" role="alert">
           {error}
         </p>
       )}
-      <div className="system-grid">
-        <section>
-          <h2>Stakl runtime</h2>
-          <dl className="properties">
-            {Object.entries(info)
-              .filter(([k]) => k !== "config_error")
-              .map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k.replaceAll("_", " ")}</dt>
-                  <dd>
-                    {k === "uptime_seconds"
-                      ? `${Math.floor(Number(v) / 60)} min`
-                      : k === "memory_bytes"
-                        ? `${(Number(v) / 1024 / 1024).toFixed(1)} MB`
-                        : String(v)}
-                  </dd>
+      {!info && !error && <p role="status">Loading system status…</p>}
+      {info && (
+        <>
+          <div className="system-sections">
+            <section>
+              <h2>Stakl runtime</h2>
+              <dl className="properties workstation-properties">
+                {Object.entries(info)
+                  .filter(([k]) => k !== "config_error")
+                  .map(([k, v]) => (
+                    <div key={k}>
+                      <dt>
+                        {k === "uptime_seconds"
+                          ? "Uptime"
+                          : k === "memory_bytes"
+                            ? "Memory"
+                            : k
+                                .replaceAll("_", " ")
+                                .replace(/^./, (first) => first.toUpperCase())}
+                      </dt>
+                      <dd>
+                        {k === "uptime_seconds"
+                          ? `${numberFormat.format(Math.floor(Number(v) / 60))} min`
+                          : k === "memory_bytes"
+                            ? `${decimalFormat.format(Number(v) / 1024 / 1024)} MB`
+                            : typeof v === "number"
+                              ? numberFormat.format(v)
+                              : String(v)}
+                      </dd>
+                    </div>
+                  ))}
+              </dl>
+            </section>
+            <section>
+              <h2>Docker</h2>
+              <p className="muted">
+                Docker is optional. Only Compose applications need it.
+              </p>
+              <button
+                className="button"
+                onClick={() =>
+                  request<{ available: boolean; message: string }>(
+                    "/system/docker",
+                  )
+                    .then(setDocker)
+                    .catch((e) =>
+                      setError(
+                        `Could not check Docker availability: ${e.message}. Check Docker and the controller connection, then retry.`,
+                      ),
+                    )
+                }
+              >
+                <Box size={15} aria-hidden="true" />
+                Check Docker availability
+              </button>
+              {docker && (
+                <div className="docker-result">
+                  <StatusIndicator
+                    status={docker.available ? "running" : "failed"}
+                  />
+                  <pre>
+                    {docker.message ||
+                      "Docker could not be reached. Check installation and daemon status."}
+                  </pre>
                 </div>
-              ))}
-          </dl>
-        </section>
-        <section>
-          <h2>Docker</h2>
-          <p className="muted">
-            Docker is optional. Only Compose applications need it.
-          </p>
-          <button
-            className="button"
-            onClick={() =>
-              request<{ available: boolean; message: string }>("/system/docker")
-                .then(setDocker)
-                .catch((e) => setError(e.message))
-            }
-          >
-            <Box size={15} />
-            Check Docker availability
-          </button>
-          {docker && (
-            <div className="docker-result">
-              <StatusBadge status={docker.available ? "running" : "failed"} />
-              <pre>
-                {docker.message ||
-                  "Docker could not be reached. Check installation and daemon status."}
-              </pre>
-            </div>
-          )}
-        </section>
-      </div>
-      <h2>Internal logs</h2>
-      <pre className="internal-logs">
-        {logs || "No internal errors recorded."}
-      </pre>
+              )}
+            </section>
+          </div>
+          <h2>Internal logs</h2>
+          <pre className="internal-logs">
+            {logs || "No internal errors recorded."}
+          </pre>
+        </>
+      )}
     </>
   );
 }
@@ -2187,29 +2639,40 @@ function Palette({
   const [q, setQ] = useState(""),
     [index, setIndex] = useState(0);
   const items = [
-    ...apps.flatMap((a) => [
-      {
-        text: `${isActive(a.runtime.state) ? "Stop" : "Start"} ${a.config.name}`,
-        icon: Play,
-        fn: () =>
-          run(a.config.id, isActive(a.runtime.state) ? "stop" : "start"),
-      },
-      {
-        text: `Restart ${a.config.name}`,
-        icon: RefreshCw,
-        fn: () => run(a.config.id, "restart"),
-      },
-      {
-        text: `Open ${a.config.name} logs`,
-        icon: Terminal,
-        fn: () => open(a.config.id, "Logs"),
-      },
-      {
-        text: `Open ${a.config.name} directory`,
-        icon: FolderOpen,
-        fn: () => run(a.config.id, "directory"),
-      },
-    ]),
+    ...apps.flatMap((a) => {
+      const active = isActive(a.runtime.state);
+      const canRun = !active || canStopApp(a);
+      return [
+        ...(canRun && a.runtime.state !== "unknown"
+          ? [
+              {
+                text: `${active ? "Stop" : "Start"} ${a.config.name}`,
+                icon: active ? Square : Play,
+                fn: () => run(a.config.id, active ? "stop" : "start"),
+              },
+            ]
+          : []),
+        ...(canRun
+          ? [
+              {
+                text: `Restart ${a.config.name}`,
+                icon: RefreshCw,
+                fn: () => run(a.config.id, "restart"),
+              },
+            ]
+          : []),
+        {
+          text: `Open ${a.config.name} logs`,
+          icon: Terminal,
+          fn: () => open(a.config.id, "Logs"),
+        },
+        {
+          text: `Open ${a.config.name} directory`,
+          icon: FolderOpen,
+          fn: () => run(a.config.id, "directory"),
+        },
+      ];
+    }),
     ...Object.entries(profiles).flatMap(([id, p]) =>
       ["start", "stop", "restart"].map((action) => ({
         text: `${typeLabel(action)} ${p.name} profile`,
@@ -2224,11 +2687,14 @@ function Palette({
   return (
     <>
       <div className="palette-input">
-        <Search size={20} />
+        <Search size={20} aria-hidden="true" />
         <input
-          autoFocus
           role="combobox"
           aria-label="Search commands"
+          name="command-search"
+          autoComplete="off"
+          spellCheck={false}
+          aria-autocomplete="list"
           aria-expanded="true"
           aria-controls="commands"
           aria-activedescendant={items[index] ? `command-${index}` : undefined}
@@ -2256,6 +2722,7 @@ function Palette({
         {items.map((c, i) => (
           <button
             role="option"
+            tabIndex={-1}
             aria-selected={index === i}
             id={`command-${i}`}
             key={c.text}
@@ -2263,15 +2730,16 @@ function Palette({
             onMouseEnter={() => setIndex(i)}
             onClick={() => onRun(c.fn)}
           >
-            <c.icon size={16} />
+            <c.icon size={16} aria-hidden="true" />
             {c.text}
-            <ChevronRight size={14} />
+            <ChevronRight size={14} aria-hidden="true" />
           </button>
         ))}
         {!items.length && <p>No commands found.</p>}
       </div>
       <div className="palette-footer">
-        <Command size={13} /> Navigate with arrow keys · Enter to run
+        <Command size={13} aria-hidden="true" /> Navigate with arrow keys ·
+        Enter to run
       </div>
     </>
   );
