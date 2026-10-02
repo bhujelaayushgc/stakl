@@ -28,7 +28,7 @@
     "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.2.0",
-    "@types/node": "^26.6.1",
+    "@types/node": "^26.6.3",
     "@types/prismjs": "^1.26.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
