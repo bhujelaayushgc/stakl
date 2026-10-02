@@ -4,13 +4,13 @@ One place to run everything on your machine.
 
 Stakl manages development servers, scripts, background workers, local tools, and Docker Compose projects without installing each application as an operating-system service. It combines a Go controller, an embedded React dashboard, a CLI, readable YAML configuration, and SQLite runtime history.
 
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/411af251-a878-4123-ba24-e72dd287c879" poster="https://github.com/user-attachments/assets/a3bd65f0-0428-46ec-9a0e-4ab39f42ea4d" controls="controls" width="100%">
-    <a href="https://github.com/user-attachments/assets/411af251-a878-4123-ba24-e72dd287c879">
-      <img src="https://github.com/user-attachments/assets/a3bd65f0-0428-46ec-9a0e-4ab39f42ea4d" alt="Watch the Stakl overview video" width="100%" />
-    </a>
-  </video>
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-dark.png" />
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/dashboard.png" />
+  <img src="docs/images/dashboard.png" alt="Stakl Applications view with profile controls, grouped application rows, health and ownership, search, and filters" width="1440" />
+</picture>
+
+*Current Applications view with real disposable test processes. [Light](docs/images/dashboard.png) · [Dark](docs/images/dashboard-dark.png).*
 
 ## Install
 
@@ -110,18 +110,33 @@ Change the directory, command and port to match an actual project. Missing direc
 
 ## Dashboard
 
-![Stakl dashboard with real disposable test processes](docs/images/dashboard.png)
+The dashboard uses a compact workstation layout with a neutral navigation rail, flat application and profile rows, and locally bundled IBM Plex fonts. **Applications**, **Ports**, **Activity**, **Configuration**, and **System** are the main destinations.
 
-*Screenshot from the browser integration test. The listed applications are real disposable processes.*
-
-- Profiles above grouped application rows; search, status/type/group filters, and favorites.
-- Start, stop, restart, protected external detection, port occupancy, links, directory and terminal actions.
+- Profiles above grouped application rows; inline running/attention counts, search, status/type/group filters, and a favorites filter.
+- Direct start/stop and log controls; **More actions** for restart, links, directory and terminal actions. Ownership and health stay visible in the application list; externally detected processes are protected.
 - App details with ownership, PID/group, uptime, launch instance, health samples, history, effective configuration, and Compose containers.
 - Live stdout/stderr with pause, tail, search, wrapping, timestamps, stream filtering, copy, and download.
-- `Cmd/Ctrl+K` command palette. Light, dark, and system themes. Responsive layout and keyboard focus.
+- `Cmd/Ctrl+K` command palette. Light, dark, and system themes in the utility bar beside controller connection status. Mobile navigation drawer, responsive rows, and visible keyboard focus.
+- Shareable destination URLs preserve the current view, application filters, and detail tab; browser back/forward navigation restores them.
 - Optional YAML editor with highlighting, validation, conflict detection, backups, and reload. Raw YAML is concealed until explicitly revealed.
 - Discovery suggestions require review and never start automatically. Global Stop All requires confirmation.
 - Open a service's **More info** menu item (or click its name) for the project path and configured/detected ports. Running Compose services use Docker's published host ports automatically; no `ports` configuration is needed for detection. The Ports page lists local TCP listeners, UDP bindings and Docker-published ports, including processes outside Stakl, and refreshes every 15 seconds while open. Local socket inspection uses `lsof` (included on macOS; install it on Linux) and is limited to processes visible to your user. An absent listener is not a guarantee that a port is available.
+
+<details>
+<summary>Live logs</summary>
+
+![Stakl application detail pane in dark mode with live stdout and stderr, search, and log controls](docs/images/logs.png)
+
+</details>
+
+<details>
+<summary>Mobile Applications view</summary>
+
+<img src="docs/images/mobile.png" alt="Stakl mobile Applications view with profile controls, filters, and running and stopped applications" width="390" />
+
+</details>
+
+Screenshots come from the isolated Chromium browser tests. See [Contributing](CONTRIBUTING.md#refresh-ui-screenshots) to refresh them.
 
 ## CLI
 

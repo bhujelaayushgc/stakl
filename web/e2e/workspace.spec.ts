@@ -34,9 +34,12 @@ test("desktop controls, live logs, keyboard palette and editor safety", async ({
   await expect(
     page.getByRole("button", { name: "More actions for Heartbeat service" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Dismiss notification" }).click();
+  await page.getByLabel("Color theme").selectOption("light");
+  await page.evaluate(() => document.fonts.ready);
   await page.screenshot({
     path: testInfo.outputPath("desktop-light.png"),
-    fullPage: true,
+    clip: { x: 0, y: 0, width: 1440, height: 520 },
   });
   await page.getByLabel("Color theme").selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -45,7 +48,7 @@ test("desktop controls, live logs, keyboard palette and editor safety", async ({
   ).toHaveCSS("background-color", "rgb(23, 32, 29)");
   await page.screenshot({
     path: testInfo.outputPath("desktop-dark.png"),
-    fullPage: true,
+    clip: { x: 0, y: 0, width: 1440, height: 520 },
   });
   await page
     .getByRole("button", { name: "Logs for Heartbeat service" })
@@ -56,6 +59,10 @@ test("desktop controls, live logs, keyboard palette and editor safety", async ({
   await expect(page.getByLabel("Application log output")).toContainText(
     "diagnostic",
   );
+  await page.screenshot({
+    path: testInfo.outputPath("logs.png"),
+    fullPage: true,
+  });
   await page.getByLabel("Log stream", { exact: true }).selectOption("stderr");
   await expect(page.locator(".log-line")).not.toContainText(["heartbeat"]);
   await page.getByLabel("Search logs", { exact: true }).fill("diagnostic");
@@ -68,10 +75,6 @@ test("desktop controls, live logs, keyboard palette and editor safety", async ({
   await expect(page.getByLabel("Application log output")).toContainText(
     "diagnostic",
   );
-  await page.screenshot({
-    path: testInfo.outputPath("logs.png"),
-    fullPage: true,
-  });
   await page.getByRole("button", { name: "Close application details" }).click();
   await page.keyboard.press("ControlOrMeta+k");
   await page
@@ -127,6 +130,7 @@ test("mobile navigation, responsive rows and detail controls", async ({
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+  await page.evaluate(() => document.fonts.ready);
   await page.screenshot({
     path: testInfo.outputPath("mobile-overview.png"),
     fullPage: true,
