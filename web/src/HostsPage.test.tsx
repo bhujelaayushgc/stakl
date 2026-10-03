@@ -254,3 +254,72 @@ it("explicit certificate replacement can remove saved custom trust", async () =>
     ca_pem: "",
   });
 });
+it("restores focus when refresh is still pending after save", async () => {
+  setup();
+  const edit = await screen.findByRole("button", { name: "Edit Lab" });
+  const original = globalThis.fetch;
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.stubGlobal("fetch", async (path: string, options: RequestInit) => {
+    if (!options.body) await delayed;
+    return original(path, options);
+  });
+  edit.focus();
+  fireEvent.click(edit);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  await waitFor(() => expect(edit).toHaveFocus());
+  release();
+});
+it("removal keeps focus on a surviving control when a delayed refresh removes the opener", async () => {
+  setup();
+  const remove = await screen.findByRole("button", { name: "Remove Lab" });
+  const original = globalThis.fetch;
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.stubGlobal("fetch", async (path: string, options: RequestInit) => {
+    if (!options.body) await delayed;
+    return original(path, options);
+  });
+  remove.focus();
+  fireEvent.click(remove);
+  fireEvent.click(screen.getByRole("button", { name: "Remove connection" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Add host" })).toHaveFocus(),
+  );
+  release();
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Remove Lab" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "Add host" })).toHaveFocus();
+});
+it("one-time token dismissal restores focus before a delayed grant refresh finishes", async () => {
+  setup();
+  await screen.findByRole("button", { name: "Edit Lab" });
+  const original = globalThis.fetch;
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.stubGlobal("fetch", async (path: string, options: RequestInit) => {
+    if (!options.body) await delayed;
+    return original(path, options);
+  });
+  fireEvent.change(screen.getByLabelText("Grant name"), {
+    target: { value: "Delayed" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Issue grant" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Dismiss token" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Issue grant" })).toHaveFocus(),
+  );
+  release();
+});

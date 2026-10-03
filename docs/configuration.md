@@ -88,6 +88,27 @@ Creation prints metadata and the token once. Lists contain only metadata. Transf
 
 Keep `tls-key.pem` on the peer and back it up separately; `stakl backup` does not include TLS files. State database backups retain controller identity and peer credentials. Do not copy a state database to create a second independent controller.
 
+### Connecting from a dashboard
+
+1. On the peer, start Stakl with native HTTPS as above, or keep its HTTP listener on loopback and establish the tunnel below.
+2. In the peer dashboard's **Hosts > Local peer access**, issue a named grant. Read includes details, history, health, and logs. Control adds only per-app start, stop, and restart. Alternatively use the `peer tokens` CLI commands above with the peer's `--config` path.
+3. Copy the one-time token. In the hub dashboard, open **Hosts > Add host**. Enter a display name, the endpoint (for example `https://peer.example:49152`), the peer token, and the public certificate PEM if needed. Connection requires a successful identity handshake.
+4. Select the host or **All hosts** in Applications. Open a row to inspect that host's tabs. Remote configuration is redacted and read-only. A remote `localhost` link is labeled with its host instead of opening on your computer; remote ports are observations, not browser reachability checks.
+
+For an SSH tunnel, leave the peer listening at `127.0.0.1:49152` and run this on the machine running the hub:
+
+```sh
+ssh -N -L 127.0.0.1:49160:127.0.0.1:49152 user@peer.example
+```
+
+Register `http://127.0.0.1:49160` on the hub using a scoped peer token. Keep the tunnel running yourself. HTTP is accepted only for verified loopback destinations; direct LAN HTTP is rejected. Stakl does not create or manage tunnels.
+
+Use **Edit** to rename a connection or explicitly replace its endpoint, token, or certificate trust. Saved tokens are never returned to the browser. Leaving the token blank retains it. Select certificate replacement with an empty PEM to return to system certificate roots. **Reconnect** immediately verifies the peer again. **Remove** forgets the connection and cached snapshot without stopping services or revoking the peer grant. Revoke that grant on the issuing peer when access is no longer wanted; active log streams close, but an already accepted action can still finish.
+
+Connection states distinguish unavailable, unauthorized, incompatible protocol, and changed controller identity. Cached rows are marked stale and cannot be controlled. The controller connection indicator describes browser-to-hub connectivity separately. If an action reports **Outcome unknown**, inspect refreshed state and history before deciding whether to act again. Stakl never automatically retries a lifecycle action.
+
+Keep the state directory and its backups private. The mode-0600 database contains recoverable outbound connection credentials, hashed issued tokens, and the persistent controller identity. Backups preserve these; TLS private keys need separate backup. Copying this database to another independent host duplicates its identity and is not a way to provision a new peer.
+
 ## App fields
 
 | Field | Meaning / default |

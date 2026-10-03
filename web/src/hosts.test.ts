@@ -79,3 +79,19 @@ it("preserves unknown action outcome without retrying", async () => {
   ).rejects.toMatchObject({ outcome_unknown: true, state: "unavailable" });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it("marks a lost mutation response as unknown without retrying", async () => {
+  const fetcher = vi.fn().mockRejectedValue(new TypeError("network gone"));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(
+    request("/hosts/lab/apps/api/restart", {}),
+  ).rejects.toMatchObject({ outcome_unknown: true });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response("partial JSON", { status: 200 })),
+  );
+  await expect(request("/hosts/lab/apps/api/start", {})).rejects.toMatchObject({
+    outcome_unknown: true,
+  });
+});

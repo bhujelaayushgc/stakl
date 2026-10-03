@@ -45,6 +45,7 @@ export interface Runtime {
   next_restart?: string;
 }
 export interface App {
+  host?: HostDescription;
   config: AppConfig;
   effective_config?: AppConfig;
   runtime: Runtime;
@@ -82,6 +83,7 @@ export interface PortScan {
   warning: string;
 }
 export function servicePorts(app: App, listeners: ListeningPort[]) {
+  if (app.host && app.host.id !== "local") listeners = [];
   const config = isActive(app.runtime.state)
     ? app.effective_config || app.config
     : app.config;
@@ -205,7 +207,12 @@ export function filterApps(
             ? ["failed", "unhealthy", "unknown"].includes(a.runtime.state)
             : a.runtime.state === status)) &&
       (!type || a.config.type === type) &&
-      (!favorites || pinned.has(a.config.id)) &&
+      (!favorites ||
+        pinned.has(
+          a.host
+            ? JSON.stringify([a.host.controller_id, a.config.id])
+            : a.config.id,
+        )) &&
       [
         a.config.name,
         a.config.id,
@@ -279,17 +286,26 @@ export async function request<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const r = await fetch("/api" + path, {
-    method: body === undefined ? "GET" : "POST",
-    signal,
-    headers: { "Content-Type": "application/json", "X-Stakl": "1" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let r: Response;
+  try {
+    r = await fetch("/api" + path, {
+      method: body === undefined ? "GET" : "POST",
+      signal,
+      headers: { "Content-Type": "application/json", "X-Stakl": "1" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new RequestError("Connection lost", {
+      outcome_unknown: body !== undefined,
+    });
+  }
   let data;
   try {
     data = await r.json();
   } catch {
-    throw Error(`Stakl returned HTTP ${r.status}`);
+    throw new RequestError(`Stakl returned HTTP ${r.status}`, {
+      outcome_unknown: body !== undefined,
+    });
   }
   if (!r.ok) throw new RequestError(data.error || `HTTP ${r.status}`, data);
   return data;

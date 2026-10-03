@@ -12,3 +12,11 @@ Verified locally for version 0.1.0:
 - Previous-machine-boot recovery uses mismatched boot-ID fixtures. The user's computer was not rebooted.
 
 The suites create temporary state directories, use ephemeral or isolated ports, and clean up only their own processes/projects. Docker and browser tests are explicit targets because they need Docker or a downloaded test browser. Desktop notifications and native Finder/terminal opening are platform integrations, not covered by automated UI tests.
+
+## Connected hosts verification
+
+The connected-host implementation was checked with `go test -race ./...`, `go vet ./...`, all 28 frontend tests, the TypeScript/Vite production build, the existing process integration suite, and all five Chromium browser tests. All four Darwin/Linux arm64/amd64 targets compiled. Docker integration was not rerun for this change because shared manager and Compose behavior did not change.
+
+`python3 scripts/connected-hosts-integration.py` starts two independent controllers with the same app ID and verifies precisely targeted start/stop/restart, read-scope enforcement, retained and streaming logs, health/history, identity and grant persistence across controller restarts, stale snapshots while workloads survive, HTTPS certificate rejection and explicit public-PEM trust, revocation, and connection removal without stopping workloads.
+
+`cd web && npm run test:e2e -- connected-hosts.spec.ts` covers registration, read/control grants, All hosts counts, host-specific detail URLs and reload/navigation, health/history/log tabs, stream/download routing, palette targeting, loopback-link protection, revoked-grant controls, keyboard navigation, and overflow at 320px and 390px. Unit tests additionally cover equal-ID busy/favorite isolation, local pin migration, obsolete-request cancellation and late-response suppression, local-listener isolation, unknown mutation outcomes without retries, and focus restoration during delayed host/grant refreshes.

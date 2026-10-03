@@ -1,6 +1,6 @@
 # Stakl
 
-One place to run everything on your machine.
+One place to run services on your machines.
 
 Stakl manages development servers, scripts, background workers, local tools, and Docker Compose projects without installing each application as an operating-system service. It combines a Go controller, an embedded React dashboard, a CLI, readable YAML configuration, and SQLite runtime history.
 
@@ -66,6 +66,12 @@ stakl open
 ```
 
 Configuration path precedence: `--config`, `STAKL_CONFIG`, then `~/.stakl/config.yml`. Keep each workspace's configuration in a separate directory: its database, logs, lock, and launch records live beside it.
+
+## Connected hosts
+
+Run Stakl on each machine, issue a read or control peer grant there, then use **Hosts > Add host** on your dashboard controller. Supply the peer endpoint, grant token, and its public certificate PEM when using a self-signed certificate. [Setup instructions](docs/configuration.md#connecting-from-a-dashboard) cover native HTTPS and manual SSH tunnels.
+
+Applications can show Local, one host, or All hosts. Host labels distinguish apps with identical IDs; logs, health, history, and start/stop/restart target the selected host. Unavailable snapshots show their last observation and do not count as currently running. Profiles, Ports, Activity, configuration editing, and workspace actions operate on the local controller. Removing a connection leaves peer services running.
 
 ## A first application
 

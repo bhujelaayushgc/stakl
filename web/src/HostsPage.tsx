@@ -123,10 +123,11 @@ export function HostsPage({
         body,
       );
       if (!mounted.current) return;
+      setPending(false);
       setEditor(null);
       onChanged();
       onNotice(editor.id ? "Host updated" : "Host connected");
-      await load();
+      void load();
     } catch {
       if (mounted.current)
         setFormError(
@@ -173,10 +174,12 @@ export function HostsPage({
         {},
       );
       if (!mounted.current) return;
+      setPending(false);
+      opener.current = isHost ? addButton.current : issueButton.current;
       setConfirmation(null);
       if (isHost) onChanged();
       onNotice(isHost ? "Host connection removed" : "Grant revoked");
-      await load();
+      void load();
     } catch {
       if (mounted.current)
         setFormError(
@@ -197,10 +200,11 @@ export function HostsPage({
         { name: grantName, access },
       );
       if (!mounted.current) return;
+      setPending(false);
       setIssuedToken(grant.token);
       setGrantName("");
       setAccess("read");
-      await load();
+      void load();
     } catch {
       if (mounted.current) {
         setActionError(

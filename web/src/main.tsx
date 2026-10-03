@@ -51,6 +51,9 @@ import "prismjs/components/prism-yaml";
 import YAML from "yaml";
 import {
   App,
+  HostEnvelope,
+  HostResponse,
+  RequestError,
   canStopApp,
   Config,
   Event,
@@ -70,6 +73,18 @@ import {
 import { PortsPage, usePortScan } from "./Ports";
 import { HostsPage } from "./HostsPage";
 import {
+  canControlApp,
+  flattenHosts,
+  groupKey,
+  hostAppPath,
+  hostRequest,
+  hostStateLabel,
+  identity,
+  isLiveApp,
+  remoteLoopback,
+  scopedGroups,
+} from "./hosts";
+import {
   EmptyState,
   IconButton,
   PageHeader,
@@ -84,7 +99,12 @@ import "@fontsource/ibm-plex-mono/latin-500.css";
 import "./style.css";
 import "./workstation.css";
 
-type Action = (id: string, action: string, profile?: boolean) => Promise<void>;
+type Action = (
+  id: string,
+  action: string,
+  profile?: boolean,
+  hostID?: string,
+) => Promise<void>;
 const icons = {
   process: Terminal,
   shell: Terminal,
@@ -123,6 +143,11 @@ const route = () => {
   return {
     page: views.has(view) ? view : "dashboard",
     selected: params.get("app"),
+    scope: params.get("host") || "local",
+    appHost:
+      params.get("host") === "all"
+        ? params.get("app_host") || "local"
+        : params.get("host") || "local",
     tab: detailTabs.has(params.get("tab") || "")
       ? params.get("tab")!
       : "Overview",
@@ -157,8 +182,11 @@ const appIcon = (a: App["config"]) =>
   )[a.icon || ""] ||
   icons[a.type as keyof typeof icons] ||
   Terminal;
-function AppShell() {
-  const [apps, setApps] = useState<App[]>([]),
+export function AppShell() {
+  const [localApps, setApps] = useState<App[]>([]),
+    [envelopes, setEnvelopes] = useState<HostEnvelope[]>([]),
+    [scope, setScope] = useState(() => route().scope),
+    [appHost, setAppHost] = useState(() => route().appHost),
     [cfg, setCfg] = useState<Config | null>(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
@@ -264,6 +292,8 @@ function AppShell() {
       currentUrl.current = window.location.href;
       setPage(next.page);
       setSelected(next.selected);
+      setScope(next.scope);
+      setAppHost(next.appHost);
       setDetailTab(next.tab);
       setSearch(next.search);
       setGroup(next.group);
@@ -294,7 +324,55 @@ function AppShell() {
       }),
     );
   }, [search, group, status, type, favorites]);
-  const ports = usePortScan(page === "ports" || !!selected);
+  const localHost = envelopes.find((e) => e.host.id === "local")?.host;
+  const allApps = useMemo(
+    () => [
+      ...localApps.map((a) => ({ ...a, host: localHost })),
+      ...flattenHosts(envelopes.filter((e) => e.host.id !== "local")),
+    ],
+    [localApps, envelopes, localHost],
+  );
+  const apps = allApps.filter(
+    (a) => scope === "all" || (a.host?.id || "local") === scope,
+  );
+  const ports = usePortScan(
+    page === "ports" || (!!selected && appHost === "local"),
+  );
+  const hostReads = useRef<AbortController | null>(null);
+  const refreshHosts = useCallback(async () => {
+    hostReads.current?.abort();
+    const controller = new AbortController();
+    hostReads.current = controller;
+    try {
+      const value = await request<HostEnvelope[]>(
+        "/hosts/apps",
+        undefined,
+        controller.signal,
+      );
+      if (!controller.signal.aborted && mounted.current)
+        setEnvelopes(value || []);
+    } catch {
+      if (!controller.signal.aborted && mounted.current)
+        setEnvelopes((current) =>
+          current.map((e) =>
+            e.host.id === "local"
+              ? e
+              : {
+                  ...e,
+                  host: { ...e.host, stale: true, state: "unavailable" },
+                },
+          ),
+        );
+    }
+  }, []);
+  useEffect(() => {
+    void refreshHosts();
+    const timer = setInterval(refreshHosts, 5000);
+    return () => {
+      clearInterval(timer);
+      hostReads.current?.abort();
+    };
+  }, [refreshHosts]);
   const refresh = useCallback(async () => {
     try {
       const [a, c] = await Promise.all([
@@ -374,29 +452,51 @@ function AppShell() {
       return () => clearTimeout(t);
     }
   }, [notice]);
-  const run: Action = async (id, action, profile = false) => {
+  const run: Action = async (id, action, profile = false, hostID = "local") => {
+    const target = allApps.find(
+      (a) => a.config.id === id && (a.host?.id || "local") === hostID,
+    );
+    if (
+      !profile &&
+      target &&
+      (!canControlApp(target) || busy.has(identity(target)))
+    )
+      return;
+    if (
+      hostID !== "local" &&
+      (profile || !["start", "stop", "restart"].includes(action))
+    )
+      return;
     setError("");
-    const key = (profile ? "profile:" : "") + id;
+    const key = profile ? "profile:" + id : target ? identity(target) : id;
     setBusy((b) => new Set(b).add(key));
     try {
-      const result = await request<Record<string, string>>(
-        `/${profile ? "profiles" : "apps"}/${encodeURIComponent(id)}/${action}`,
-        {},
-      );
+      const result =
+        hostID === "local"
+          ? await request<Record<string, string>>(
+              `/${profile ? "profiles" : "apps"}/${encodeURIComponent(id)}/${action}`,
+              {},
+            )
+          : (
+              await request<HostResponse<Record<string, string>>>(
+                hostAppPath(hostID, id, action),
+                {},
+              )
+            ).data;
       const failures = Object.entries(result).filter(
         ([, v]) => typeof v === "string" && v !== "ok",
       );
       if (failures.length)
         throw Error(failures.map(([k, v]) => `${k}: ${v}`).join("\n"));
       setNotice(
-        `${profile ? "Profile" : apps.find((a) => a.config.id === id)?.config.name || id}: ${action} complete`,
+        `${profile ? "Profile" : `${target?.host?.name || "Local"} / ${target?.config.name || id}`}: ${action} complete`,
       );
     } catch (e) {
       const name = profile
         ? "profile"
-        : apps.find((a) => a.config.id === id)?.config.name || id;
+        : `${target?.host?.name || "Local"} / ${target?.config.name || id}`;
       setError(
-        `Could not ${action} ${name}: ${(e as Error).message}. ${action === "directory" || action === "terminal" ? "Check the configured path and local permissions." : "Check Activity or the application logs for details."}`,
+        `Could not ${action} ${name}: ${(e as Error).message}. ${e instanceof RequestError && e.outcome_unknown ? "Outcome unknown. Inspect refreshed state and history before deciding whether to act again." : action === "directory" || action === "terminal" ? "Check the configured path and local permissions." : "Check Activity or the application logs for details."}`,
       );
     } finally {
       setBusy((b) => {
@@ -405,6 +505,7 @@ function AppShell() {
         return next;
       });
       refresh();
+      void refreshHosts();
     }
   };
   const globalAction = async (action: string) => {
@@ -431,19 +532,26 @@ function AppShell() {
       refresh();
     }
   };
-  const openDetail = (id: string, tab = "Overview") => {
+  const openDetail = (id: string, tab = "Overview", hostID = "local") => {
     writeUrl(
-      routeUrl({ app: id, tab: tab === "Overview" ? null : tab }),
+      routeUrl({
+        app: id,
+        tab: tab === "Overview" ? null : tab,
+        app_host: scope === "all" ? hostID : null,
+        host: scope === "all" ? "all" : hostID === "local" ? null : hostID,
+      }),
       true,
       true,
     );
     setSelected(id);
+    setAppHost(hostID);
+    if (scope !== "all") setScope(hostID);
     setDetailTab(tab);
   };
   const closeDetail = () => {
     if (window.history.state?.staklDetailFrom) window.history.back();
     else {
-      writeUrl(routeUrl({ app: null, tab: null }));
+      writeUrl(routeUrl({ app: null, app_host: null, tab: null }));
       setSelected(null);
     }
   };
@@ -458,12 +566,37 @@ function AppShell() {
   const pinned = useMemo(
     () =>
       new Set(
-        apps
-          .filter((a) => pins[a.config.id] ?? a.config.favorite)
-          .map((a) => a.config.id),
+        allApps
+          .filter(
+            (a) =>
+              pins[identity(a)] ??
+              ((a.host?.id || "local") === "local"
+                ? pins[a.config.id]
+                : undefined) ??
+              a.config.favorite,
+          )
+          .map(identity),
       ),
-    [apps, pins],
+    [allApps, pins],
   );
+  useEffect(() => {
+    if (!localHost) return;
+    setPins((previous) => {
+      const next = { ...previous };
+      let changed = false;
+      for (const app of localApps) {
+        if (Object.hasOwn(next, app.config.id)) {
+          const key = identity({ ...app, host: localHost });
+          if (!Object.hasOwn(next, key)) next[key] = next[app.config.id];
+          delete next[app.config.id];
+          changed = true;
+        }
+      }
+      if (!changed) return previous;
+      localStorage.setItem("stakl-pins", JSON.stringify(next));
+      return next;
+    });
+  }, [localHost, localApps]);
   const pin = (id: string) =>
     setPins((p) => {
       const n = { ...p, [id]: !pinned.has(id) };
@@ -473,18 +606,79 @@ function AppShell() {
   const filtered = filterApps(
     apps,
     search,
-    group,
+    "",
     status,
     type,
     pinned,
     favorites,
+  ).filter((a) => !group || groupKey(a, scope) === group);
+  const groups = scopedGroups(apps, envelopes, scope);
+  const cachedCurrent = allApps.find(
+    (a) => a.config.id === selected && (a.host?.id || "local") === appHost,
   );
-  const groups = Object.entries(cfg?.groups || {}).sort(
-    (a, b) => a[1].order - b[1].order,
-  );
-  if (apps.some((a) => !a.config.group))
-    groups.push(["", { name: "Ungrouped", order: 999 }]);
-  const current = apps.find((a) => a.config.id === selected);
+  const [detailRead, setDetailRead] = useState<{
+    host: string;
+    id: string;
+    app: App;
+  } | null>(null);
+  const [detailError, setDetailError] = useState("");
+  useEffect(() => {
+    setDetailRead(null);
+    setDetailError("");
+    if (!selected) return;
+    let controller = new AbortController();
+    const load = async () => {
+      controller.abort();
+      controller = new AbortController();
+      const current = controller;
+      try {
+        const app = await hostRequest<App>(
+          appHost,
+          selected,
+          "",
+          current.signal,
+        );
+        if (!current.signal.aborted) {
+          setDetailRead({ host: appHost, id: selected, app });
+          setDetailError("");
+        }
+      } catch (e) {
+        if (!current.signal.aborted)
+          setDetailError(
+            `Could not refresh application: ${(e as Error).message}`,
+          );
+      }
+    };
+    void load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [selected, appHost]);
+  const current =
+    appHost !== "local" &&
+    cachedCurrent &&
+    detailRead?.host === appHost &&
+    detailRead.id === selected
+      ? { ...detailRead.app, host: cachedCurrent.host }
+      : cachedCurrent;
+  const changeScope = (value: string) => {
+    setScope(value);
+    setSelected(null);
+    setAppHost(value === "all" ? "local" : value);
+    setGroup("");
+    writeUrl(
+      routeUrl({
+        host: value === "local" ? null : value,
+        app: null,
+        app_host: null,
+        tab: null,
+        group: null,
+      }),
+      true,
+    );
+  };
   const reload = async () => {
     try {
       await request("/config/reload", {});
@@ -512,7 +706,12 @@ function AppShell() {
     if (page === "config") setConfigDirty(false);
     if (page === "discover") setDiscoverDirty(false);
     writeUrl(
-      routeUrl({ view: p === "dashboard" ? null : p, app: null, tab: null }),
+      routeUrl({
+        view: p === "dashboard" ? null : p,
+        app: null,
+        app_host: null,
+        tab: null,
+      }),
       true,
     );
     setPage(p);
@@ -520,7 +719,12 @@ function AppShell() {
     setMobileNav(false);
   };
   const navHref = (p: string) =>
-    routeUrl({ view: p === "dashboard" ? null : p, app: null, tab: null }).href;
+    routeUrl({
+      view: p === "dashboard" ? null : p,
+      app: null,
+      app_host: null,
+      tab: null,
+    }).href;
   const onNavClick = (
     event: React.MouseEvent<HTMLAnchorElement>,
     p: string,
@@ -656,6 +860,7 @@ function AppShell() {
                     discover: "Discover apps",
                     system: "System",
                     ports: "Ports",
+                    hosts: "Hosts",
                   } as Record<string, string>
                 )[page]
               }
@@ -693,6 +898,9 @@ function AppShell() {
           tabIndex={-1}
           className={`${page === "dashboard" ? "overview-page" : `${page}-page`} workstation-page`}
         >
+          {page !== "dashboard" && page !== "hosts" && (
+            <p className="local-scope-note">Local controller</p>
+          )}
           {error && (
             <div className="alert error" role="alert">
               <AlertCircle size={18} aria-hidden="true" />
@@ -722,87 +930,138 @@ function AppShell() {
               <PageHeader
                 title="Applications"
                 actions={
-                  <>
-                    <button className="button" onClick={() => nav("discover")}>
-                      <Plus size={15} aria-hidden="true" />
-                      Discover apps
-                    </button>
-                    <Dropdown.Root>
-                      <Dropdown.Trigger asChild>
-                        <button
-                          className="button"
-                          disabled={busy.has("global")}
-                        >
-                          {busy.has("global") ? (
-                            <LoaderCircle
-                              className="spin"
-                              size={15}
+                  scope === "local" && (
+                    <>
+                      <button
+                        className="button"
+                        onClick={() => nav("discover")}
+                      >
+                        <Plus size={15} aria-hidden="true" />
+                        Discover apps
+                      </button>
+                      <Dropdown.Root>
+                        <Dropdown.Trigger asChild>
+                          <button
+                            className="button"
+                            disabled={busy.has("global")}
+                          >
+                            {busy.has("global") ? (
+                              <LoaderCircle
+                                className="spin"
+                                size={15}
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <Play size={14} aria-hidden="true" />
+                            )}
+                            Workspace actions
+                            <ChevronRight
+                              className="rotate-down"
+                              size={14}
                               aria-hidden="true"
                             />
-                          ) : (
-                            <Play size={14} aria-hidden="true" />
-                          )}
-                          Workspace actions
-                          <ChevronRight
-                            className="rotate-down"
-                            size={14}
-                            aria-hidden="true"
-                          />
-                        </button>
-                      </Dropdown.Trigger>
-                      <Dropdown.Portal>
-                        <Dropdown.Content className="dropdown" align="end">
-                          <Dropdown.Item onSelect={() => globalAction("start")}>
-                            <Play aria-hidden="true" />
-                            Start all
-                          </Dropdown.Item>
-                          <Dropdown.Item
-                            onSelect={() => globalAction("restart")}
-                          >
-                            <RefreshCw aria-hidden="true" />
-                            Restart running
-                          </Dropdown.Item>
-                          <Dropdown.Separator />
-                          <Dropdown.Item
-                            className="danger"
-                            onSelect={() =>
-                              setConfirm({
-                                title: "Stop all applications?",
-                                message:
-                                  "This stops all included applications. Configured exclusions and externally detected processes are protected.",
-                                actionLabel: "Stop all",
-                                run: () => globalAction("stop"),
-                              })
-                            }
-                          >
-                            <Square aria-hidden="true" />
-                            Stop all
-                          </Dropdown.Item>
-                        </Dropdown.Content>
-                      </Dropdown.Portal>
-                    </Dropdown.Root>
-                  </>
+                          </button>
+                        </Dropdown.Trigger>
+                        <Dropdown.Portal>
+                          <Dropdown.Content className="dropdown" align="end">
+                            <Dropdown.Item
+                              onSelect={() => globalAction("start")}
+                            >
+                              <Play aria-hidden="true" />
+                              Start all
+                            </Dropdown.Item>
+                            <Dropdown.Item
+                              onSelect={() => globalAction("restart")}
+                            >
+                              <RefreshCw aria-hidden="true" />
+                              Restart running
+                            </Dropdown.Item>
+                            <Dropdown.Separator />
+                            <Dropdown.Item
+                              className="danger"
+                              onSelect={() =>
+                                setConfirm({
+                                  title: "Stop all applications?",
+                                  message:
+                                    "This stops all included applications. Configured exclusions and externally detected processes are protected.",
+                                  actionLabel: "Stop all",
+                                  run: () => globalAction("stop"),
+                                })
+                              }
+                            >
+                              <Square aria-hidden="true" />
+                              Stop all
+                            </Dropdown.Item>
+                          </Dropdown.Content>
+                        </Dropdown.Portal>
+                      </Dropdown.Root>
+                    </>
+                  )
                 }
               />
-              {Object.keys(cfg?.profiles || {}).length > 0 && (
-                <section className="profiles-section">
-                  <div className="workstation-section-heading">
-                    <h2>Profiles</h2>
-                  </div>
-                  <div className="profiles workstation-list">
-                    {Object.entries(cfg!.profiles).map(([id, p]) => (
-                      <ProfileCard
-                        key={id}
-                        id={id}
-                        profile={p}
-                        apps={apps}
-                        busy={busy.has("profile:" + id)}
-                        run={run}
-                      />
+              <div className="host-scope-bar">
+                <label htmlFor="host-scope">Host</label>
+                <select
+                  id="host-scope"
+                  value={scope}
+                  onChange={(e) => changeScope(e.target.value)}
+                >
+                  <option value="local">Local</option>
+                  <option value="all">All hosts</option>
+                  {envelopes
+                    .filter((e) => e.host.id !== "local")
+                    .map((e) => (
+                      <option key={e.host.id} value={e.host.id}>
+                        {e.host.name}
+                      </option>
                     ))}
+                  {scope !== "all" &&
+                    scope !== "local" &&
+                    !envelopes.some((e) => e.host.id === scope) && (
+                      <option value={scope}>Unavailable host</option>
+                    )}
+                </select>
+              </div>
+              {envelopes
+                .filter(
+                  (e) =>
+                    e.host.id !== "local" &&
+                    (scope === "all" || scope === e.host.id),
+                )
+                .map((e) => (
+                  <div key={e.host.id} className="host-summary" role="status">
+                    <strong>{e.host.name}</strong> ·{" "}
+                    {hostStateLabel(e.host.state)} ·{" "}
+                    {e.host.access === "read" ? "Read-only" : "Control"}
+                    {(e.host.stale || e.host.state !== "online") && (
+                      <span>
+                        {" "}
+                        · Stale snapshot · Last seen:{" "}
+                        {elapsed(e.host.last_seen)} ago
+                      </span>
+                    )}
                   </div>
-                </section>
-              )}
+                ))}
+              {scope === "local" &&
+                Object.keys(cfg?.profiles || {}).length > 0 && (
+                  <section className="profiles-section">
+                    <div className="workstation-section-heading">
+                      <h2>Profiles</h2>
+                    </div>
+                    <div className="profiles workstation-list">
+                      {Object.entries(cfg!.profiles).map(([id, p]) => (
+                        <ProfileCard
+                          key={id}
+                          id={id}
+                          profile={p}
+                          apps={apps}
+                          busy={busy.has("profile:" + id)}
+                          run={run}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
               <section className="applications" aria-label="Application list">
                 <h2 className="sr-only">Application groups</h2>
                 <div
@@ -819,8 +1078,9 @@ function AppShell() {
                     </strong>
                     <span>
                       {numberFormat.format(
-                        filtered.filter((a) => isActive(a.runtime.state))
-                          .length,
+                        filtered.filter(
+                          (a) => isLiveApp(a) && isActive(a.runtime.state),
+                        ).length,
                       )}{" "}
                       running
                     </span>
@@ -848,7 +1108,9 @@ function AppShell() {
                     onClick={() => setFavorites(!favorites)}
                   >
                     <Star size={14} aria-hidden="true" />{" "}
-                    <span>{pinned.size}</span>
+                    <span>
+                      {apps.filter((a) => pinned.has(identity(a))).length}
+                    </span>
                   </button>
                   <SearchField
                     label="Search applications"
@@ -919,6 +1181,13 @@ function AppShell() {
                     <LoaderCircle className="spin" aria-hidden="true" />
                     Connecting to controller…
                   </div>
+                ) : apps.length === 0 && scope !== "local" ? (
+                  <EmptyState title="No observed applications" plain>
+                    <p>
+                      This host may be unavailable or have no configured apps.
+                      Check Hosts for connection status.
+                    </p>
+                  </EmptyState>
                 ) : apps.length === 0 ? (
                   <div className="onboarding">
                     <h2>No applications configured</h2>
@@ -977,7 +1246,7 @@ function AppShell() {
                     </div>
                     {groups.map(([id, g]) => {
                       const rows = filtered.filter(
-                        (a) => a.config.group === id,
+                        (a) => groupKey(a, scope) === id,
                       );
                       return (
                         rows.length > 0 && (
@@ -998,19 +1267,26 @@ function AppShell() {
                             {rows
                               .sort(
                                 (a, b) =>
-                                  Number(pinned.has(b.config.id)) -
-                                    Number(pinned.has(a.config.id)) ||
+                                  Number(pinned.has(identity(b))) -
+                                    Number(pinned.has(identity(a))) ||
                                   a.config.name.localeCompare(b.config.name),
                               )
                               .map((a) => (
                                 <AppRow
-                                  key={a.config.id}
+                                  key={identity(a)}
                                   app={a}
-                                  busy={busy.has(a.config.id)}
-                                  pinned={pinned.has(a.config.id)}
-                                  onPin={() => pin(a.config.id)}
+                                  localControls={scope === "local"}
+                                  busy={busy.has(identity(a))}
+                                  pinned={pinned.has(identity(a))}
+                                  onPin={() => pin(identity(a))}
                                   run={run}
-                                  onOpen={(tab) => openDetail(a.config.id, tab)}
+                                  onOpen={(tab) =>
+                                    openDetail(
+                                      a.config.id,
+                                      tab,
+                                      a.host?.id || "local",
+                                    )
+                                  }
                                 />
                               ))}
                           </section>
@@ -1052,10 +1328,16 @@ function AppShell() {
             </>
           )}
           {page === "hosts" && (
-            <HostsPage onChanged={() => void refresh()} onNotice={setNotice} />
+            <HostsPage
+              onChanged={() => {
+                void refresh();
+                void refreshHosts();
+              }}
+              onNotice={setNotice}
+            />
           )}
           {page === "system" && <SystemPage />}
-          {page === "ports" && <PortsPage apps={apps} {...ports} />}
+          {page === "ports" && <PortsPage apps={localApps} {...ports} />}
         </main>
       </div>
       <Dialog.Root open={!!selected} onOpenChange={(o) => !o && closeDetail()}>
@@ -1079,7 +1361,7 @@ function AppShell() {
                     <span>
                       {typeLabel(current.config.type)}
                       <span className="dot-separator">·</span>
-                      {current.config.id}
+                      {current.config.id} · {current.host?.name || "Local"}
                     </span>
                   </div>
                   <IconButton
@@ -1089,13 +1371,16 @@ function AppShell() {
                     <X size={20} aria-hidden="true" />
                   </IconButton>
                 </div>
+                {detailError && <p role="alert">{detailError}</p>}
                 <Detail
+                  key={identity(current)}
                   app={current}
+                  localControls={scope === "local"}
                   portScan={ports}
                   tab={detailTab}
                   setTab={changeDetailTab}
                   run={run}
-                  busy={busy.has(current.config.id)}
+                  busy={busy.has(identity(current))}
                   confirm={(run) =>
                     setConfirm({
                       title: "Force kill application?",
@@ -1141,14 +1426,15 @@ function AppShell() {
             <Dialog.Title className="sr-only">Command palette</Dialog.Title>
             <Palette
               apps={apps}
-              profiles={cfg?.profiles || {}}
+              busy={busy}
+              profiles={scope === "local" ? cfg?.profiles || {} : {}}
               onRun={(fn) => {
                 setPalette(false);
                 fn();
               }}
               run={run}
               open={openDetail}
-              reload={reload}
+              reload={scope === "local" ? reload : undefined}
             />
           </Dialog.Content>
         </Dialog.Portal>
@@ -1265,19 +1551,25 @@ function ProfileCard({
 }
 function AppRow({
   app: a,
+  localControls,
   busy,
   pinned,
   onPin,
-  run,
+  run: dispatch,
   onOpen,
 }: {
   app: App;
+  localControls: boolean;
   busy: boolean;
   pinned: boolean;
   onPin: () => void;
   run: Action;
   onOpen: (tab?: string) => void;
 }) {
+  const remote = !!a.host && a.host.id !== "local";
+  const run: Action = (id, action) =>
+    dispatch(id, action, false, a.host?.id || "local");
+  const blocked = !canControlApp(a);
   const active = isActive(a.runtime.state),
     canStop = canStopApp(a);
   const link = Object.values(a.config.links || {})[0];
@@ -1285,7 +1577,7 @@ function AppRow({
     <div
       className="app-row workstation-list-row workstation-ledger-grid"
       role="group"
-      aria-label={`${a.config.name} application`}
+      aria-label={`${a.config.name}${remote ? ` on ${a.host!.name}` : ""} application`}
     >
       <div className="app-identity">
         <div
@@ -1302,6 +1594,7 @@ function AppRow({
             {pinned && <Pin size={11} aria-hidden="true" />}
           </button>
           <span>
+            {a.host && <span className="host-badge">{a.host.name} · </span>}
             {a.config.description || typeLabel(a.config.type)}
             {a.config.autostart.enabled && (
               <span className="autostart">Autostart</span>
@@ -1312,6 +1605,11 @@ function AppRow({
       <div>
         <span className="sr-only">State: </span>
         <StatusIndicator status={a.runtime.state} plain />
+        {!isLiveApp(a) && (
+          <small className="stale-note">
+            Stale · Last seen {elapsed(a.host?.last_seen || "")} ago
+          </small>
+        )}
         {a.runtime.next_restart && (
           <small className="retry-note">Retry scheduled</small>
         )}
@@ -1329,7 +1627,7 @@ function AppRow({
           <small>
             {a.runtime.owned
               ? "Owned by Stakl"
-              : external
+              : a.runtime.state === "external"
                 ? "External process"
                 : "Active"}
           </small>
@@ -1346,7 +1644,7 @@ function AppRow({
           <button
             className={`button small ${!active ? "start-button" : ""}`}
             aria-label={`${active ? "Stop" : "Start"} ${a.config.name}`}
-            disabled={busy || a.runtime.state === "unknown"}
+            disabled={busy || blocked || a.runtime.state === "unknown"}
             onClick={() => run(a.config.id, active ? "stop" : "start")}
           >
             {busy ? (
@@ -1374,12 +1672,12 @@ function AppRow({
               {active && canStop && (
                 <Dropdown.Item
                   onSelect={() => run(a.config.id, "restart")}
-                  disabled={busy}
+                  disabled={busy || blocked}
                 >
                   <RefreshCw aria-hidden="true" /> Restart
                 </Dropdown.Item>
               )}
-              {link && (
+              {link && !remoteLoopback(a, link) && (
                 <Dropdown.Item asChild>
                   <a href={link} target="_blank" rel="noreferrer">
                     <ArrowUpRight aria-hidden="true" /> Open app
@@ -1391,14 +1689,18 @@ function AppRow({
                 {pinned ? "Unpin" : "Pin to favorites"}
               </Dropdown.Item>
               <Dropdown.Separator />
-              <Dropdown.Item onSelect={() => run(a.config.id, "directory")}>
-                <FolderOpen aria-hidden="true" />
-                Open directory
-              </Dropdown.Item>
-              <Dropdown.Item onSelect={() => run(a.config.id, "terminal")}>
-                <Terminal aria-hidden="true" />
-                Open terminal here
-              </Dropdown.Item>
+              {localControls && !remote && (
+                <Dropdown.Item onSelect={() => run(a.config.id, "directory")}>
+                  <FolderOpen aria-hidden="true" />
+                  Open directory
+                </Dropdown.Item>
+              )}
+              {localControls && !remote && (
+                <Dropdown.Item onSelect={() => run(a.config.id, "terminal")}>
+                  <Terminal aria-hidden="true" />
+                  Open terminal here
+                </Dropdown.Item>
+              )}
             </Dropdown.Content>
           </Dropdown.Portal>
         </Dropdown.Root>
@@ -1408,14 +1710,16 @@ function AppRow({
 }
 function Detail({
   app: a,
+  localControls,
   portScan,
   tab,
   setTab,
-  run,
+  run: dispatch,
   busy,
   confirm,
 }: {
   app: App;
+  localControls: boolean;
   portScan: ReturnType<typeof usePortScan>;
   tab: string;
   setTab: (s: string) => void;
@@ -1423,13 +1727,22 @@ function Detail({
   busy: boolean;
   confirm: (f: () => void) => void;
 }) {
+  const remote = !!a.host && a.host.id !== "local";
+  const run: Action = (id, action) =>
+    dispatch(id, action, false, a.host?.id || "local");
+  const blocked = !canControlApp(a);
   const active = isActive(a.runtime.state);
-  const portList = servicePorts(a, portScan.scan?.ports || []);
+  const portList = servicePorts(a, remote ? [] : portScan.scan?.ports || []);
   const canStop = canStopApp(a);
   return (
     <>
       <div className="detail-status">
         <StatusIndicator status={a.runtime.state} plain />
+        {!isLiveApp(a) && (
+          <small className="stale-note">
+            Stale · Last seen {elapsed(a.host?.last_seen || "")} ago
+          </small>
+        )}
         <span>
           {a.runtime.owned
             ? "Managed by Stakl"
@@ -1442,7 +1755,10 @@ function Detail({
         <button
           className={`button${active ? "" : " primary"}`}
           disabled={
-            busy || (active && !canStop) || a.runtime.state === "unknown"
+            blocked ||
+            busy ||
+            (active && !canStop) ||
+            a.runtime.state === "unknown"
           }
           onClick={() => run(a.config.id, active ? "stop" : "start")}
         >
@@ -1457,24 +1773,30 @@ function Detail({
         </button>
         <button
           className="button"
-          disabled={busy || (active && !canStop)}
+          disabled={busy || blocked || (active && !canStop)}
           onClick={() => run(a.config.id, "restart")}
         >
           <RefreshCw size={14} aria-hidden="true" />
           Restart
         </button>
-        {Object.entries(a.config.links || {}).map(([name, url]) => (
-          <a
-            className="button"
-            key={name}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {name}
-            <ArrowUpRight size={14} aria-hidden="true" />
-          </a>
-        ))}
+        {Object.entries(a.config.links || {}).map(([name, url]) =>
+          remoteLoopback(a, url) ? (
+            <span className="remote-link" key={name}>
+              {name}: {url} (loopback on {a.host?.name})
+            </span>
+          ) : (
+            <a
+              className="button"
+              key={name}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {name}
+              <ArrowUpRight size={14} aria-hidden="true" />
+            </a>
+          ),
+        )}
       </div>
       <div
         className="tabs"
@@ -1558,22 +1880,24 @@ function Detail({
             </dl>
             <h3>Working directory</h3>
             <code className="code-block">{a.config.cwd}</code>
-            <div className="inline-actions">
-              <button
-                className="button small"
-                onClick={() => run(a.config.id, "directory")}
-              >
-                <FolderOpen size={14} aria-hidden="true" />
-                Open directory
-              </button>
-              <button
-                className="button small"
-                onClick={() => run(a.config.id, "terminal")}
-              >
-                <Terminal size={14} aria-hidden="true" />
-                Open terminal here
-              </button>
-            </div>
+            {localControls && !remote && (
+              <div className="inline-actions">
+                <button
+                  className="button small"
+                  onClick={() => run(a.config.id, "directory")}
+                >
+                  <FolderOpen size={14} aria-hidden="true" />
+                  Open directory
+                </button>
+                <button
+                  className="button small"
+                  onClick={() => run(a.config.id, "terminal")}
+                >
+                  <Terminal size={14} aria-hidden="true" />
+                  Open terminal here
+                </button>
+              </div>
+            )}
             <h3>Start command</h3>
             <code className="code-block">
               {a.config.type === "docker-compose"
@@ -1594,12 +1918,12 @@ function Detail({
               </>
             )}
             <h3>Ports</h3>
-            {portScan.error && (
+            {!remote && portScan.error && (
               <p className="alert error" role="alert">
                 {portScan.error}
               </p>
             )}
-            {portScan.scan?.warning && (
+            {!remote && portScan.scan?.warning && (
               <p className="muted">
                 Some ports may be missing: {portScan.scan.warning}
               </p>
@@ -1620,25 +1944,35 @@ function Detail({
             </div>
             {portList.length === 0 && (
               <p className="muted">
-                {!active
-                  ? "No ports configured. Stopped services have no live ports to detect."
-                  : !portScan.scan && !portScan.error
-                    ? "Detecting ports…"
-                    : "No ports associated with this service. For externally managed services, declare ports in the application configuration."}
+                {remote
+                  ? "No ports declared in the peer snapshot."
+                  : !active
+                    ? "No ports configured. Stopped services have no live ports to detect."
+                    : !portScan.scan && !portScan.error
+                      ? "Detecting ports…"
+                      : "No ports associated with this service. For externally managed services, declare ports in the application configuration."}
               </p>
             )}
-            <button
-              className="button small"
-              disabled={portScan.loading}
-              onClick={portScan.refresh}
-            >
-              <RefreshCw
-                size={14}
-                className={portScan.loading ? "spin" : ""}
-                aria-hidden="true"
-              />
-              {portScan.loading ? "Scanning…" : "Refresh ports"}
-            </button>
+            {remote && (
+              <p className="muted">
+                Ports observed on {a.host?.name}. Browser reachability is not
+                checked.
+              </p>
+            )}
+            {!remote && (
+              <button
+                className="button small"
+                disabled={portScan.loading}
+                onClick={portScan.refresh}
+              >
+                <RefreshCw
+                  size={14}
+                  className={portScan.loading ? "spin" : ""}
+                  aria-hidden="true"
+                />
+                {portScan.loading ? "Scanning…" : "Refresh ports"}
+              </button>
+            )}
             {a.containers.length > 0 && (
               <>
                 <h3>Compose containers</h3>
@@ -1659,7 +1993,9 @@ function Detail({
                 <p className="notes">{a.config.notes}</p>
               </>
             )}
-            {a.runtime.owned &&
+            {localControls &&
+              !remote &&
+              a.runtime.owned &&
               active &&
               (a.runtime.launch || a.config.type === "docker-compose") && (
                 <div className="danger-zone">
@@ -1674,16 +2010,29 @@ function Detail({
               )}
           </>
         )}
-        {tab === "Logs" && <LogViewer id={a.config.id} active={active} />}{" "}
-        {tab === "Health" && (
-          <HealthHistory id={a.config.id} hasCheck={!!a.config.health.type} />
+        {tab === "Logs" && (
+          <LogViewer
+            id={a.config.id}
+            hostID={a.host?.id || "local"}
+            active={active}
+          />
         )}{" "}
-        {tab === "History" && <Timeline id={a.config.id} />}{" "}
+        {tab === "Health" && (
+          <HealthHistory
+            hostID={a.host?.id || "local"}
+            id={a.config.id}
+            hasCheck={!!a.config.health.type}
+          />
+        )}{" "}
+        {tab === "History" && (
+          <Timeline hostID={a.host?.id || "local"} id={a.config.id} />
+        )}{" "}
         {tab === "Configuration" && (
           <>
             <p className="muted">
-              Effective configuration. Environment values are redacted. Edit the
-              source YAML from Configuration.
+              {remote
+                ? "Redacted peer configuration snapshot. Edit configuration on the peer controller."
+                : "Effective configuration. Environment values are redacted. Edit the source YAML from Configuration."}
             </p>
             <pre className="code-block config-code">
               {JSON.stringify(a.effective_config || a.config, null, 2)}
@@ -1713,7 +2062,15 @@ const LogRow = React.memo(function LogRow({
     </div>
   );
 });
-function LogViewer({ id, active }: { id: string; active: boolean }) {
+function LogViewer({
+  id,
+  active,
+  hostID = "local",
+}: {
+  id: string;
+  active: boolean;
+  hostID?: string;
+}) {
   const [lines, setLines] = useState<LogLine[]>([]),
     [paused, setPaused] = useState(false),
     [follow, setFollow] = useState(true),
@@ -1730,15 +2087,29 @@ function LogViewer({ id, active }: { id: string; active: boolean }) {
   }, [paused]);
   useEffect(() => {
     setLines([]);
+    setError("");
+    setConnected(false);
+    let disposed = false;
     let pending: LogLine[] = [];
     let timer: ReturnType<typeof setTimeout> | undefined;
     const es = new EventSource(
-      `/api/apps/${encodeURIComponent(id)}/logs?follow=true`,
+      `/api${hostAppPath(hostID, id, "logs")}?follow=true`,
     );
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
+    es.onopen = () => {
+      if (!disposed) setConnected(true);
+    };
+    es.onerror = () => {
+      if (!disposed) setConnected(false);
+    };
+    es.addEventListener("connection-error", () => {
+      if (!disposed) {
+        setConnected(false);
+        setError("Host connection lost. Reopen logs to reconnect.");
+        es.close();
+      }
+    });
     es.onmessage = (e) => {
-      if (!pausedRef.current) {
+      if (!disposed && !pausedRef.current) {
         try {
           pending.push(JSON.parse(e.data) as LogLine);
           if (!timer)
@@ -1756,10 +2127,11 @@ function LogViewer({ id, active }: { id: string; active: boolean }) {
       }
     };
     return () => {
+      disposed = true;
       es.close();
       clearTimeout(timer);
     };
-  }, [id]);
+  }, [id, hostID]);
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [lines, follow]);
@@ -1849,7 +2221,7 @@ function LogViewer({ id, active }: { id: string; active: boolean }) {
           </IconButton>
           <a
             className="icon-button"
-            href={`/api/apps/${encodeURIComponent(id)}/logs?download=true`}
+            href={`/api${hostAppPath(hostID, id, "logs")}?download=true`}
             aria-label="Download logs"
             title="Download logs"
           >
@@ -1906,28 +2278,55 @@ function LogViewer({ id, active }: { id: string; active: boolean }) {
     </div>
   );
 }
-function HealthHistory({ id, hasCheck }: { id: string; hasCheck: boolean }) {
+export function HealthHistory({
+  id,
+  hasCheck,
+  hostID = "local",
+}: {
+  id: string;
+  hasCheck: boolean;
+  hostID?: string;
+}) {
   const [rows, setRows] = useState<Health[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
   useEffect(() => {
-    const load = () =>
-      request<Health[]>(`/apps/${id}/health`)
-        .then((result) => {
-          setRows(result);
+    let controller = new AbortController();
+    setRows([]);
+    setError("");
+    setLoading(true);
+    const load = async () => {
+      controller.abort();
+      controller = new AbortController();
+      const current = controller;
+      try {
+        const result = await hostRequest<Health[]>(
+          hostID,
+          id,
+          "health",
+          controller.signal,
+        );
+        if (!current.signal.aborted) {
+          setRows(result || []);
           setError("");
-        })
-        .catch((e) =>
-          setError(
-            `Could not load health history: ${e.message}. Check the controller connection and reopen this application.`,
-          ),
-        )
-        .finally(() => setLoading(false));
-    load();
-    const es = new EventSource("/api/events");
-    es.onmessage = load;
-    return () => es.close();
-  }, [id]);
+        }
+      } catch (e) {
+        if (!current.signal.aborted)
+          setError(`Could not load health history: ${(e as Error).message}`);
+      } finally {
+        if (!current.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    const es = hostID === "local" ? new EventSource("/api/events") : null;
+    if (es) es.onmessage = () => void load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      controller.abort();
+      es?.close();
+      clearInterval(timer);
+    };
+  }, [id, hostID]);
   if (!hasCheck)
     return (
       <EmptyState icon={HeartPulse} title="No health check configured" plain>
@@ -1971,28 +2370,44 @@ function HealthHistory({ id, hasCheck }: { id: string; hasCheck: boolean }) {
     </>
   );
 }
-function Timeline({ id }: { id?: string }) {
+function Timeline({ id, hostID = "local" }: { id?: string; hostID?: string }) {
   const [rows, setRows] = useState<Event[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
   useEffect(() => {
-    const load = () =>
-      request<Event[]>(id ? `/apps/${id}/history` : "/history")
-        .then((result) => {
-          setRows(result);
+    let controller = new AbortController();
+    setRows([]);
+    setError("");
+    setLoading(true);
+    const load = async () => {
+      controller.abort();
+      controller = new AbortController();
+      const current = controller;
+      try {
+        const result = await (id
+          ? hostRequest<Event[]>(hostID, id, "history", controller.signal)
+          : request<Event[]>("/history", undefined, controller.signal));
+        if (!current.signal.aborted) {
+          setRows(result || []);
           setError("");
-        })
-        .catch((e) =>
-          setError(
-            `Could not load activity: ${e.message}. Check the controller connection and try again.`,
-          ),
-        )
-        .finally(() => setLoading(false));
-    load();
-    const es = new EventSource("/api/events");
-    es.onmessage = load;
-    return () => es.close();
-  }, [id]);
+        }
+      } catch (e) {
+        if (!current.signal.aborted)
+          setError(`Could not load activity: ${(e as Error).message}`);
+      } finally {
+        if (!current.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    const es = hostID === "local" ? new EventSource("/api/events") : null;
+    if (es) es.onmessage = () => void load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      controller.abort();
+      es?.close();
+      clearInterval(timer);
+    };
+  }, [id, hostID]);
   return (
     <div className="timeline workstation-list">
       {error && <p role="alert">{error}</p>}
@@ -2637,6 +3052,7 @@ function SystemPage() {
 }
 function Palette({
   apps,
+  busy,
   profiles,
   onRun,
   run,
@@ -2644,57 +3060,83 @@ function Palette({
   reload,
 }: {
   apps: App[];
+  busy: Set<string>;
   profiles: Record<string, Profile>;
   onRun: (fn: () => void) => void;
   run: Action;
-  open: (id: string, tab?: string) => void;
-  reload: () => void;
+  open: (id: string, tab?: string, hostID?: string) => void;
+  reload?: () => void;
 }) {
   const [q, setQ] = useState(""),
     [index, setIndex] = useState(0);
   const items = [
     ...apps.flatMap((a) => {
       const active = isActive(a.runtime.state);
-      const canRun = !active || canStopApp(a);
+      const canRun =
+        !busy.has(identity(a)) &&
+        canControlApp(a) &&
+        (!active || canStopApp(a));
+      const name = `${a.config.name} (${a.host?.name || "Local"})`;
       return [
         ...(canRun && a.runtime.state !== "unknown"
           ? [
               {
-                text: `${active ? "Stop" : "Start"} ${a.config.name}`,
+                text: `${active ? "Stop" : "Start"} ${name}`,
                 icon: active ? Square : Play,
-                fn: () => run(a.config.id, active ? "stop" : "start"),
+                fn: () =>
+                  run(
+                    a.config.id,
+                    active ? "stop" : "start",
+                    false,
+                    a.host?.id || "local",
+                  ),
               },
             ]
           : []),
         ...(canRun
           ? [
               {
-                text: `Restart ${a.config.name}`,
+                text: `Restart ${name}`,
                 icon: RefreshCw,
-                fn: () => run(a.config.id, "restart"),
+                fn: () =>
+                  run(a.config.id, "restart", false, a.host?.id || "local"),
               },
             ]
           : []),
         {
-          text: `Open ${a.config.name} logs`,
+          text: `Open ${name} logs`,
           icon: Terminal,
-          fn: () => open(a.config.id, "Logs"),
+          fn: () => open(a.config.id, "Logs", a.host?.id || "local"),
         },
-        {
-          text: `Open ${a.config.name} directory`,
-          icon: FolderOpen,
-          fn: () => run(a.config.id, "directory"),
-        },
-      ];
+        ...(reload && (a.host?.id || "local") === "local"
+          ? [
+              {
+                text: `Open ${name} directory`,
+                icon: FolderOpen,
+                fn: () => run(a.config.id, "directory", false, "local"),
+              },
+            ]
+          : []),
+      ].map((item) => ({ ...item, key: `${identity(a)}:${item.text}` }));
     }),
     ...Object.entries(profiles).flatMap(([id, p]) =>
       ["start", "stop", "restart"].map((action) => ({
+        key: `profile:${id}:${action}`,
         text: `${typeLabel(action)} ${p.name} profile`,
         icon: Layers3,
         fn: () => run(id, action, true),
       })),
     ),
-    { text: "Reload configuration", icon: RefreshCw, fn: reload },
+    ...(reload
+      ? [
+          {
+            key: "reload",
+            text: "Reload configuration",
+            icon: RefreshCw,
+            fn: reload,
+          },
+        ]
+      : []),
   ]
     .filter((c) => c.text.toLowerCase().includes(q.toLowerCase()))
     .slice(0, 40);
@@ -2739,7 +3181,7 @@ function Palette({
             tabIndex={-1}
             aria-selected={index === i}
             id={`command-${i}`}
-            key={c.text}
+            key={c.key}
             className={index === i ? "selected" : ""}
             onMouseEnter={() => setIndex(i)}
             onClick={() => onRun(c.fn)}
@@ -2759,8 +3201,10 @@ function Palette({
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <AppShell />
-  </React.StrictMode>,
-);
+const root = document.getElementById("root");
+if (root)
+  createRoot(root).render(
+    <React.StrictMode>
+      <AppShell />
+    </React.StrictMode>,
+  );
