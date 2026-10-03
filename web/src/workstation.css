@@ -1347,6 +1347,50 @@
 }
 
 /* Host connections use the workstation's ledger, form and focus language. */
+.hosts-help {
+  max-width: 76ch;
+  margin-top: 20px;
+  border-block: 1px solid var(--line);
+}
+.hosts-help > summary {
+  padding: 12px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.hosts-help > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.hosts-help-content {
+  padding-bottom: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.hosts-help-content h3 {
+  margin: 16px 0 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+.hosts-help-content p,
+.hosts-help-content ol {
+  margin: 8px 0;
+}
+.hosts-help-content ol {
+  padding-left: 22px;
+  list-style: decimal;
+}
+.hosts-help-content li + li {
+  margin-top: 8px;
+}
+.hosts-help-content strong {
+  color: var(--text);
+}
+.hosts-help-content a {
+  text-decoration: underline;
+}
 .hosts-section {
   margin-top: 28px;
 }

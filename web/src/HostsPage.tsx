@@ -237,6 +237,63 @@ export function HostsPage({
           </button>
         }
       />
+      <details className="hosts-help">
+        <summary>Help with connected hosts</summary>
+        <div className="hosts-help-content">
+          <p>
+            Each machine runs its own Stakl controller and dashboard. Connect
+            another machine here to view its services, health, history, and logs
+            alongside your local applications.
+          </p>
+          <h3>Connect another machine</h3>
+          <ol>
+            <li>
+              Run Stakl on the other machine with an HTTPS endpoint this
+              controller can reach. You can also use an SSH tunnel with loopback
+              HTTP.
+            </li>
+            <li>
+              On that machine, open <strong>Hosts</strong>, then{" "}
+              <strong>Local peer access</strong>. Name the grant, choose Read or
+              Control, and select <strong>Issue grant</strong>. Copy the token;
+              it is shown only once.
+            </li>
+            <li>
+              Return to this dashboard and select <strong>Add host</strong>.
+              Enter the other machine's endpoint and token. For self-signed
+              HTTPS, paste its public certificate into{" "}
+              <strong>Trusted CA PEM</strong>.
+            </li>
+          </ol>
+          <h3>What does a grant allow?</h3>
+          <p>
+            A grant gives another dashboard permission to access the machine
+            that issued it. <strong>Read</strong> allows viewing service
+            details, status, health, history, and logs. <strong>Control</strong>{" "}
+            adds per-app start, stop, and restart. Configuration editing and
+            workspace actions stay local.
+          </p>
+          <h3>Let another dashboard connect here</h3>
+          <p>
+            Issue a grant under <strong>Local peer access</strong> below. Use
+            its token in <strong>Add host</strong> on the other dashboard.
+            Connections are one-way; to connect both directions, issue a grant
+            on each machine and add each connection separately.
+          </p>
+          <p>
+            Keep tokens private. Revoke a grant on the machine that issued it to
+            withdraw access. Removing a connection leaves that machine's
+            services running.
+          </p>
+          <a
+            href="https://github.com/bhujelaayushgc/stakl/blob/dev/docs/configuration.md#https-and-headless-peers"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Full setup guide (opens in a new tab)
+          </a>
+        </div>
+      </details>
       {loadError && (
         <div className="hosts-error" role="alert">
           {loadError}{" "}
@@ -315,9 +372,9 @@ export function HostsPage({
       <section className="hosts-section" aria-labelledby="grants-title">
         <h2 id="grants-title">Local peer access</h2>
         <p>
-          Issue a grant on this controller for another host to connect. Read
-          access includes service logs. Control adds per-app start, stop, and
-          restart.
+          Grants issued here let other dashboards access this machine. To
+          connect to another machine, use a grant issued there. Read includes
+          service logs; Control adds per-app start, stop, and restart.
         </p>
         <form className="host-grant-form" onSubmit={issueGrant}>
           <label>
@@ -414,6 +471,7 @@ export function HostsPage({
                   <input
                     type="password"
                     required={!editor.id}
+                    aria-describedby="peer-token-help"
                     value={editor.token}
                     onChange={(e) =>
                       setEditor({ ...editor, token: e.target.value })
@@ -421,6 +479,10 @@ export function HostsPage({
                     autoComplete="new-password"
                   />
                 </label>
+                <p className="host-input-help" id="peer-token-help">
+                  Use a token issued under Local peer access on the host you are
+                  connecting to.
+                </p>
                 {editor.id && (
                   <>
                     <p className="host-input-help">
@@ -550,8 +612,9 @@ export function HostsPage({
           >
             <Dialog.Title>Peer grant issued</Dialog.Title>
             <Dialog.Description>
-              Copy this token now and use it when connecting to this controller.
-              It will not be shown again.
+              Copy this token now. On the other dashboard, open Hosts, select
+              Add host, and use it to connect to this machine. It will not be
+              shown again.
             </Dialog.Description>
             <label>
               One-time peer token
