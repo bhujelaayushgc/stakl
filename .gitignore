@@ -13,6 +13,7 @@ __pycache__/
 
 /web/test-results/
 /web/playwright-report/
+/docs/planning/
 
 # Skills and agent artifacts
 /.agents/
