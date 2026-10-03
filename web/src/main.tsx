@@ -68,6 +68,7 @@ import {
   servicePorts,
 } from "./types";
 import { PortsPage, usePortScan } from "./Ports";
+import { HostsPage } from "./HostsPage";
 import {
   EmptyState,
   IconButton,
@@ -107,6 +108,7 @@ const views = new Set([
   "config",
   "discover",
   "system",
+  "hosts",
 ]);
 const detailTabs = new Set([
   "Overview",
@@ -602,6 +604,15 @@ function AppShell() {
             <Activity aria-hidden="true" />
             Activity
           </a>
+          <a
+            href={navHref("hosts")}
+            className={page === "hosts" ? "active" : ""}
+            aria-current={page === "hosts" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "hosts")}
+          >
+            <Server aria-hidden="true" />
+            Hosts
+          </a>
           <div className="nav-separator" />
           <a
             href={navHref("config")}
@@ -1039,6 +1050,9 @@ function AppShell() {
               <PageHeader title="Activity" />
               <Timeline />
             </>
+          )}
+          {page === "hosts" && (
+            <HostsPage onChanged={() => void refresh()} onNotice={setNotice} />
           )}
           {page === "system" && <SystemPage />}
           {page === "ports" && <PortsPage apps={apps} {...ports} />}

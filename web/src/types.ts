@@ -225,9 +225,63 @@ export function profileState(p: Profile, apps: App[]) {
     failed: selected.some((a) => a.runtime.state === "failed"),
   };
 }
-export async function request<T>(path: string, body?: unknown): Promise<T> {
+export type HostState =
+  | "connecting"
+  | "online"
+  | "unavailable"
+  | "unauthorized"
+  | "incompatible"
+  | "identity_mismatch";
+export interface HostDescription {
+  id: string;
+  controller_id: string;
+  name: string;
+  url: string;
+  access: "read" | "control";
+  state: HostState;
+  last_seen: string;
+  stale: boolean;
+  error: string;
+}
+export interface HostEnvelope {
+  host: HostDescription;
+  groups: Config["groups"];
+  apps: App[];
+}
+export interface HostResponse<T> {
+  host: HostDescription;
+  data: T;
+}
+export interface HostedApp extends App {
+  host: HostDescription;
+}
+export interface PeerGrant {
+  id: string;
+  name: string;
+  access: "read" | "control";
+  created_at: string;
+}
+export class RequestError extends Error {
+  state?: HostState;
+  outcome_unknown: boolean;
+  constructor(
+    message: string,
+    details: { state?: HostState; outcome_unknown?: boolean } = {},
+  ) {
+    super(message);
+    this.name = "RequestError";
+    this.state = details.state;
+    this.outcome_unknown = details.outcome_unknown === true;
+  }
+}
+export async function request<T>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const r = await fetch("/api" + path, {
     method: body === undefined ? "GET" : "POST",
+    signal,
     headers: { "Content-Type": "application/json", "X-Stakl": "1" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -237,7 +291,7 @@ export async function request<T>(path: string, body?: unknown): Promise<T> {
   } catch {
     throw Error(`Stakl returned HTTP ${r.status}`);
   }
-  if (!r.ok) throw Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) throw new RequestError(data.error || `HTTP ${r.status}`, data);
   return data;
 }
 export function elapsed(value: string) {
