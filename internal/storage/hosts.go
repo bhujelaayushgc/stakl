@@ -37,6 +37,9 @@ func (s *Store) migrateHosts() error {
 CREATE TABLE IF NOT EXISTS peer_grants(id TEXT PRIMARY KEY, name TEXT NOT NULL, access TEXT NOT NULL CHECK(access IN ('read','control')), created_at TEXT NOT NULL, token_hash BLOB NOT NULL UNIQUE);`); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS host_connections(id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, controller_id TEXT NOT NULL UNIQUE, token TEXT NOT NULL, ca_pem TEXT NOT NULL, access TEXT NOT NULL CHECK(access IN ('read','control')))`); err != nil {
+		return err
+	}
 	id, err := randomID()
 	if err != nil {
 		return err
@@ -45,6 +48,42 @@ CREATE TABLE IF NOT EXISTS peer_grants(id TEXT PRIMARY KEY, name TEXT NOT NULL, 
 		return err
 	}
 	return tx.Commit()
+}
+
+// HostConnection contains recoverable outbound credentials for the private
+// database only. It must never be used as an API response.
+type HostConnection struct {
+	ID, Name, URL, ControllerID, Token, CAPEM, Access string
+}
+
+func (s *Store) Hosts() ([]HostConnection, error) {
+	rows, err := s.DB.Query("SELECT id,name,url,controller_id,token,ca_pem,access FROM host_connections ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	hosts := []HostConnection{}
+	for rows.Next() {
+		var h HostConnection
+		if err := rows.Scan(&h.ID, &h.Name, &h.URL, &h.ControllerID, &h.Token, &h.CAPEM, &h.Access); err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, h)
+	}
+	return hosts, rows.Err()
+}
+
+func (s *Store) SaveHost(h HostConnection) error {
+	if h.ID == "" || strings.TrimSpace(h.Name) == "" || h.URL == "" || h.ControllerID == "" || h.Token == "" {
+		return fmt.Errorf("host connection is incomplete")
+	}
+	_, err := s.DB.Exec(`INSERT INTO host_connections(id,name,url,controller_id,token,ca_pem,access) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,url=excluded.url,controller_id=excluded.controller_id,token=excluded.token,ca_pem=excluded.ca_pem,access=excluded.access`, h.ID, h.Name, h.URL, h.ControllerID, h.Token, h.CAPEM, h.Access)
+	return err
+}
+
+func (s *Store) DeleteHost(id string) error {
+	_, err := s.DB.Exec("DELETE FROM host_connections WHERE id=?", id)
+	return err
 }
 
 func (s *Store) ControllerID() (string, error) {

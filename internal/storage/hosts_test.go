@@ -10,6 +10,45 @@ import (
 	"testing"
 )
 
+func TestRegistrationStorageUniqueAndDurable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := HostConnection{ID: "first", Name: "Peer", URL: "http://127.0.0.1:1234", ControllerID: "remote", Token: "outbound-secret", CAPEM: "custom-ca", Access: "read"}
+	if err := s.SaveHost(host); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := host
+	duplicate.ID = "second"
+	if err := s.SaveHost(duplicate); err == nil {
+		t.Fatal("duplicate controller saved")
+	}
+	host.Name = "Renamed"
+	host.Access = "control"
+	if err := s.SaveHost(host); err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	got, err := s.Hosts()
+	if err != nil || len(got) != 1 || got[0] != host {
+		t.Fatalf("hosts: %+v %v", got, err)
+	}
+	if err := s.DeleteHost(host.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.Hosts()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("delete: %+v %v", got, err)
+	}
+}
+
 func TestControllerIdentityPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	s, err := Open(path)
