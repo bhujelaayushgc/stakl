@@ -893,8 +893,8 @@ func (m *Manager) Reload() error {
 				break
 			}
 		}
-		if c.Server.Host != m.cfg.Server.Host || c.Server.Port != m.cfg.Server.Port || c.Server.Token != m.cfg.Server.Token {
-			e = fmt.Errorf("server binding/authentication changed; restart Stakl to apply")
+		if c.Server.Host != m.cfg.Server.Host || c.Server.Port != m.cfg.Server.Port || c.Server.Token != m.cfg.Server.Token || c.Server.TLSCertFile != m.cfg.Server.TLSCertFile || c.Server.TLSKeyFile != m.cfg.Server.TLSKeyFile {
+			e = fmt.Errorf("server binding/authentication/TLS changed; restart Stakl to apply")
 		}
 		m.mu.RUnlock()
 	}

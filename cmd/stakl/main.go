@@ -5,6 +5,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,9 +32,10 @@ import (
 var version = "dev"
 
 type instance struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
-	PID   int    `json:"pid"`
+	URL    string `json:"url"`
+	Token  string `json:"token"`
+	PID    int    `json:"pid"`
+	CAFile string `json:"ca_file,omitempty"`
 }
 
 func main() {
@@ -83,6 +86,9 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
   profile start|stop|restart ID     Operate on a profile
   config validate|path|reload       Manage YAML configuration
   init | open | backup             Setup, dashboard, backup
+  tls init --host HOST             Create HTTPS certificate and key
+  peer tokens create --name NAME [--access read|control]
+  peer tokens list | revoke ID     Manage scoped peer credentials
   reset-state --yes                Reset runtime metadata (server must be stopped)
   version                         Print version`)
 			return nil
@@ -121,6 +127,9 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	if len(args) > 0 && args[0] == "reset-state" {
 		return reset(dir, args)
 	}
+	if len(args) > 0 && args[0] == "tls" {
+		return runTLS(dir, args[1:])
+	}
 	if e := config.Init(path); e != nil {
 		return e
 	}
@@ -151,6 +160,14 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	listenPort := c.Server.Port
 	if port != 0 {
 		listenPort = port
+	}
+	var tlsConfig *tls.Config
+	var certificate *x509.Certificate
+	if c.Server.TLSCertFile != "" {
+		tlsConfig, certificate, e = api.LoadTLS(c.Server.TLSCertFile, c.Server.TLSKeyFile)
+		if e != nil {
+			return e
+		}
 	}
 	lock, e := supervisor.Lock(filepath.Join(dir, "instance.lock"))
 	if e != nil {
@@ -189,18 +206,27 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	if host == "::" {
 		host = "::1"
 	}
+	scheme := "http"
+	if certificate != nil {
+		scheme = "https"
+		host, e = tlsClientHost(certificate, host)
+		if e != nil {
+			return e
+		}
+	}
 	clientAddress := net.JoinHostPort(host, strconv.Itoa(listenPort))
-	inst = instance{URL: "http://" + clientAddress, Token: token, PID: os.Getpid()}
+	inst = instance{URL: scheme + "://" + clientAddress, Token: token, PID: os.Getpid(), CAFile: c.Server.TLSCertFile}
 	if e = supervisor.AtomicJSON(filepath.Join(dir, "instance.json"), inst); e != nil {
 		return e
 	}
 	defer os.Remove(filepath.Join(dir, "instance.json"))
 	m := manager.New(c, path, dir, db)
 	m.Notify = api.Notify
-	s := &api.Server{Manager: m, Token: token, Address: clientAddress, BindHost: c.Server.Host, Version: version, Started: time.Now(), Assets: web.Assets()}
+	s := &api.Server{Manager: m, Token: token, Address: clientAddress, BindHost: c.Server.Host, Certificate: certificate, Version: version, Started: time.Now(), Assets: web.Assets()}
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	server := &http.Server{
 		Handler:           s.Handler(),
+		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -209,7 +235,11 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	}
 	serverErr := make(chan error, 1)
 	go func() {
-		serverErr <- server.Serve(listener)
+		if tlsConfig != nil {
+			serverErr <- server.ServeTLS(listener, "", "")
+		} else {
+			serverErr <- server.Serve(listener)
+		}
 	}()
 	m.StartWorkers()
 	watchCtx, watchCancel := context.WithCancel(context.Background())
@@ -250,7 +280,7 @@ func existing(dir string) (instance, bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	r, e := api.Client(ctx, i.URL, i.Token, "GET", "/api/system/status", nil)
+	r, e := instanceClient(ctx, i, "GET", "/api/system/status", nil)
 	if e != nil {
 		return i, false
 	}
@@ -258,6 +288,15 @@ func existing(dir string) (instance, bool) {
 	return i, r.StatusCode == 200
 }
 func cli(i instance, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("command required")
+	}
+	if args[0] == "peer" {
+		if len(args) < 2 || args[1] != "tokens" {
+			return fmt.Errorf("usage: stakl peer tokens create|list|revoke")
+		}
+		return runPeerTokens(i, args[2:])
+	}
 	method := "GET"
 	path := ""
 	switch args[0] {
@@ -312,7 +351,7 @@ func cli(i instance, args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	r, e := api.Client(ctx, i.URL, i.Token, method, path, nil)
+	r, e := instanceClient(ctx, i, method, path, nil)
 	if e != nil {
 		return e
 	}

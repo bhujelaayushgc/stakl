@@ -180,6 +180,8 @@ type Config struct {
 		Port        int    `yaml:"port" json:"port"`
 		OpenBrowser *bool  `yaml:"open_browser" json:"open_browser"`
 		Token       string `yaml:"token,omitempty" json:"-"`
+		TLSCertFile string `yaml:"tls_cert_file,omitempty" json:"tls_cert_file,omitempty"`
+		TLSKeyFile  string `yaml:"tls_key_file,omitempty" json:"tls_key_file,omitempty"`
 	} `yaml:"server" json:"server"`
 	Defaults struct {
 		StopTimeout       Duration `yaml:"stop_timeout" json:"stop_timeout"`
@@ -265,6 +267,13 @@ func Parse(b []byte, base string) (*Config, error) {
 	}
 	if !ip.IsLoopback() && len(c.Server.Token) < 32 {
 		return nil, fmt.Errorf("server.token must contain at least 32 characters when binding beyond localhost")
+	}
+	if (c.Server.TLSCertFile == "") != (c.Server.TLSKeyFile == "") {
+		return nil, fmt.Errorf("server.tls_cert_file and server.tls_key_file must be set together")
+	}
+	if c.Server.TLSCertFile != "" {
+		c.Server.TLSCertFile = Expand(c.Server.TLSCertFile, base)
+		c.Server.TLSKeyFile = Expand(c.Server.TLSKeyFile, base)
 	}
 	if c.Defaults.StopTimeout == 0 {
 		c.Defaults.StopTimeout = Duration(10 * time.Second)

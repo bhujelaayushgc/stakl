@@ -14,6 +14,9 @@ server:
   open_browser: true
   # Required if host is not loopback. Use at least 32 random characters.
   # token: ...
+  # Set both to enable native HTTPS; paths are relative to this config directory.
+  # tls_cert_file: tls-cert.pem
+  # tls_key_file: tls-key.pem
 
 defaults:
   stop_timeout: 10s
@@ -47,6 +50,43 @@ apps: {}
 Groups only organize the dashboard. Profile memberships cross group boundaries. Global exclusions omit direct selection for Start All, Stop All, and Restart Running; a dependency of an included app may still be started to satisfy that app. Stopping never implicitly stops dependencies outside the selected set.
 
 All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations are rejected. Zero values select the documented default where applicable.
+
+## HTTPS and headless peers
+
+Create a certificate without starting a controller:
+
+```sh
+stakl --config /path/to/config.yml tls init --host peer.example
+```
+
+Use the DNS name or IP address that other machines will connect to. This creates `tls-cert.pem` and `tls-key.pem` beside the configuration with private file permissions. The self-signed ECDSA certificate lasts one year and includes `localhost`, `127.0.0.1`, `::1`, and the supplied host as SANs. Existing files, including partial pairs, are preserved.
+
+Configure the pair and a strong full administration token for remote binding:
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 49152
+  open_browser: false
+  token: REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS
+  tls_cert_file: tls-cert.pem
+  tls_key_file: tls-key.pem
+```
+
+Start with `stakl --config /path/to/config.yml --no-browser`. Local CLI commands automatically trust the configured public certificate and verify its SAN. Custom certificates must cover the local CLI address, normally `127.0.0.1` or `::1`; `localhost` also works when it resolves entirely to loopback. A DNS-only certificate for a remote name cannot replace these local SANs on a wildcard listener. Server binding, token, and TLS setting changes require a controller restart; replacing certificate files also requires restarting to load them.
+
+Issue a scoped credential from the running controller:
+
+```sh
+stakl peer tokens create --name Laptop                  # read access by default
+stakl peer tokens create --name Laptop --access control # per-app start/stop/restart
+stakl peer tokens list
+stakl peer tokens revoke GRANT_ID
+```
+
+Creation prints metadata and the token once. Lists contain only metadata. Transfer the **public `tls-cert.pem`** to the connecting machine as its trusted PEM, together with the scoped token and `https://peer.example:49152` endpoint. Certificate chains and DNS/IP SANs must verify; there is no insecure TLS option. A headless peer does not require its certificate to be installed in the hub browser. `stakl open` opens the local HTTPS dashboard; using the self-signed certificate in that browser requires trusting the public certificate there.
+
+Keep `tls-key.pem` on the peer and back it up separately; `stakl backup` does not include TLS files. State database backups retain controller identity and peer credentials. Do not copy a state database to create a second independent controller.
 
 ## App fields
 

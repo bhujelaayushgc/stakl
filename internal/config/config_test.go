@@ -4,10 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestTLSConfigPair(t *testing.T) {
+	dir := t.TempDir()
+	for _, setting := range []string{"tls_cert_file: cert.pem", "tls_key_file: key.pem"} {
+		if _, err := Parse([]byte("version: 1\nserver: {"+setting+"}\n"), dir); err == nil || !strings.Contains(err.Error(), "together") {
+			t.Fatalf("unpaired TLS setting: %v", err)
+		}
+	}
+	c, err := Parse([]byte("version: 1\nserver: {tls_cert_file: cert.pem, tls_key_file: key.pem}\n"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Server.TLSCertFile != filepath.Join(dir, "cert.pem") || c.Server.TLSKeyFile != filepath.Join(dir, "key.pem") {
+		t.Fatalf("unresolved TLS paths: %+v", c.Server)
+	}
+	if _, err = Parse([]byte("version: 1\nserver: {host: 0.0.0.0, tls_cert_file: cert.pem, tls_key_file: key.pem}\n"), dir); err == nil {
+		t.Fatal("TLS bypassed remote admin token requirement")
+	}
+}
 
 func TestParseAndDependencies(t *testing.T) {
 	dir := t.TempDir()

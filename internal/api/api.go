@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"github.com/bhujelaayushgc/stakl/internal/config"
@@ -15,7 +16,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +33,7 @@ type Server struct {
 	Started                 time.Time
 	Assets                  fs.FS
 	BindHost                string
+	Certificate             *x509.Certificate
 	saveMu                  sync.Mutex
 	ControllerID            string
 	controllerOnce          sync.Once
@@ -129,7 +130,7 @@ func (s *Server) Handler() http.Handler {
 				http.Error(w, "Invalid dashboard token", http.StatusUnauthorized)
 				return
 			}
-			http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Value: s.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+			http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Value: s.Token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -149,7 +150,11 @@ func (s *Server) Handler() http.Handler {
 				errorJSON(w, fmt.Errorf("open Stakl from the CLI to authenticate this browser"), 401)
 				return
 			}
-			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			if origin := r.Header.Get("Origin"); origin != "" && origin != scheme+"://"+r.Host {
 				errorJSON(w, fmt.Errorf("cross-origin request refused"), 403)
 				return
 			}
@@ -169,11 +174,17 @@ func (s *Server) validHost(address string) bool {
 	if address == s.Address {
 		return true
 	}
+	host, port, e := net.SplitHostPort(address)
+	_, expected, _ := net.SplitHostPort(s.Address)
+	if e != nil || port != expected {
+		return false
+	}
+	if s.Certificate != nil && s.Certificate.VerifyHostname(host) == nil {
+		return true
+	}
 	if s.BindHost != "0.0.0.0" && s.BindHost != "::" {
 		return false
 	}
-	host, port, e := net.SplitHostPort(address)
-	_, expected, _ := net.SplitHostPort(s.Address)
 	ip := net.ParseIP(host)
 	return e == nil && port == expected && ip != nil && !ip.IsUnspecified()
 }
@@ -579,21 +590,5 @@ end run`
 	}
 }
 func Client(ctx context.Context, address, token, method, path string, body io.Reader) (*http.Response, error) {
-	u, e := url.Parse(address)
-	if e != nil {
-		return nil, e
-	}
-	req, e := http.NewRequestWithContext(ctx, method, u.String()+path, body)
-	if e != nil {
-		return nil, e
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Stakl", "1")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DisableKeepAlives = true
-	return (&http.Client{Transport: transport}).Do(req)
+	return ClientWithCA(ctx, address, token, method, path, body, nil)
 }

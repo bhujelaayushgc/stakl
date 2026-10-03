@@ -156,12 +156,16 @@ stakl config validate
 stakl config path
 stakl config reload
 stakl init
+stakl tls init --host peer.example
+stakl peer tokens create --name Laptop --access read
+stakl peer tokens list
+stakl peer tokens revoke GRANT_ID
 stakl backup
 stakl reset-state --yes
 stakl --version
 ```
 
-Operational CLI commands use the running controller's authenticated localhost API. If none is running, they explain how to start one. `init`, `config path`, and `config validate` work without a controller. `backup` uses a consistent SQLite snapshot; `reset-state` requires the controller and all verified launches to be stopped. It preserves configuration, logs, and project directories.
+Operational CLI commands use the running controller's authenticated API, automatically trusting its configured public certificate under HTTPS. If none is running, they explain how to start one. `init`, `tls init`, `config path`, and `config validate` work without a controller. See [HTTPS and headless setup](docs/configuration.md#https-and-headless-peers) for certificate generation, public PEM transfer, and scoped peer credentials. `backup` uses a consistent SQLite snapshot; TLS certificates and keys require separate backups. `reset-state` requires the controller and all verified launches to be stopped. It preserves configuration, logs, and project directories.
 
 ## Architecture and safety
 
@@ -171,7 +175,7 @@ Each normal process launch gets a detached Stakl supervisor, a private authentic
 
 The parent remains unreaped during descendant cleanup, preventing process-group ID reuse while signaling. TERM/INT/etc. is followed by KILL after the configured timeout. Programs that deliberately escape their process group by daemonizing need a custom runner with status and stop commands. This is a local control plane, not a sandbox for untrusted commands.
 
-Localhost is the default. All API calls require a token; browser sessions use HttpOnly, SameSite cookies, Host checks, origin checks, and a custom mutation header. Non-loopback binding requires a 32-character token. HTTP is not encrypted: keep the service local or put authenticated TLS in front of it. Configuration, environment files, launch records, logs, and backups may contain secrets; keep the state directory private.
+Localhost is the default. All API calls require a token; browser sessions use HttpOnly, SameSite cookies, Host checks, origin checks, and a custom mutation header. Native HTTPS also marks cookies Secure. Non-loopback binding requires a 32-character administration token. Configure native HTTPS before remote access; scoped peer credentials are accepted only over TLS or loopback transport. Configuration, environment files, launch records, logs, and backups may contain secrets; keep the state directory private.
 
 ## Development
 
@@ -200,6 +204,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before sending changes and [SECURITY.md](
 - `instance.json`: current controller address/token. `instance.lock`: OS-backed single-instance lock.
 - `internal.log`: controller diagnostics, rotated on startup above 5 MB.
 
-Live reload keeps the last valid configuration, refuses removal of active apps, and leaves running launch configuration intact. Server binding/token changes require a controller restart. Restarting the computer stops workloads; launch Stakl to trigger configured autostart. Stakl does not register itself or apps with launchd/systemd.
+Live reload keeps the last valid configuration, refuses removal of active apps, and leaves running launch configuration intact. Server binding/token/TLS changes require a controller restart. Restarting the computer stops workloads; launch Stakl to trigger configured autostart. Stakl does not register itself or apps with launchd/systemd.
 
 Health is monitored by a bounded, serialized worker loop. Lifecycle operations are serialized for predictable ownership; very large workspaces or slow custom checks can delay other operations. Log views show up to 5,000 lines, downloads up to 10,000 recent lines; full retained JSONL files are in `logs/`. Favorites/theme are browser-local preferences. Discovery searches four directory levels and at most 20,000 entries. Windows has an explicit unsupported platform boundary pending a job-object implementation.
