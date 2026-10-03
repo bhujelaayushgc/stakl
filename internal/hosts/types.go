@@ -23,3 +23,26 @@ type LifecycleResponse struct {
 	Info    Info              `json:"info"`
 	Results map[string]string `json:"results"`
 }
+
+type PeerActionResult = LifecycleResponse
+
+type ConnectionState string
+
+const (
+	StateConnecting       ConnectionState = "connecting"
+	StateOnline           ConnectionState = "online"
+	StateUnavailable      ConnectionState = "unavailable"
+	StateUnauthorized     ConnectionState = "unauthorized"
+	StateIncompatible     ConnectionState = "incompatible"
+	StateIdentityMismatch ConnectionState = "identity_mismatch"
+)
+
+// HostError deliberately excludes upstream bodies, URLs, and credentials.
+type HostError struct {
+	Message        string
+	State          ConnectionState
+	StatusCode     int
+	OutcomeUnknown bool
+}
+
+func (e *HostError) Error() string { return e.Message }
