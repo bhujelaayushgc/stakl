@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/hosts"
 	"github.com/bhujelaayushgc/stakl/internal/manager"
 	"github.com/bhujelaayushgc/stakl/internal/runner"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
@@ -29,6 +30,7 @@ import (
 
 type Server struct {
 	Manager                 *manager.Manager
+	Hosts                   *hosts.Registry
 	Token, Address, Version string
 	Started                 time.Time
 	Assets                  fs.FS
@@ -63,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux := http.NewServeMux()
 	s.peerRoutes(mux)
+	s.hostRoutes(mux)
 	mux.HandleFunc("GET /api/apps", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Views()) })
 	mux.HandleFunc("GET /api/apps/{id}", s.app)
 	mux.HandleFunc("POST /api/apps/{id}/{action}", s.action)

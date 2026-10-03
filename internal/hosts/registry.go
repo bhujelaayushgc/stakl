@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -408,4 +411,96 @@ func (r *Registry) Snapshots() []Envelope {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Host.ID < result[j].Host.ID })
 	return result
+}
+
+// connection captures a generation without exposing connection secrets. Network
+// work holds no registry lock and is canceled when this generation is replaced.
+func (r *Registry) connection(id string, control bool) (*hostEntry, *Client, error) {
+	r.mu.RLock()
+	entry := r.entries[id]
+	if r.closed || entry == nil {
+		r.mu.RUnlock()
+		return nil, nil, &HostError{Message: "Host registration is unavailable", State: StateUnavailable, StatusCode: http.StatusNotFound}
+	}
+	record, client := entry.record, entry.client
+	r.mu.RUnlock()
+	if client == nil {
+		var err error
+		client, err = NewClient(record.URL, record.Token, record.CAPEM, record.ControllerID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.entries[id] != entry || entry.ctx.Err() != nil {
+		client.http.CloseIdleConnections()
+		return nil, nil, unavailable("Host registration changed")
+	}
+	if entry.client == nil {
+		entry.client = client
+	}
+	if control {
+		if description(entry, time.Now()).Stale {
+			return nil, nil, &HostError{Message: "Host observation is stale; reconnect before operating", State: entry.state, StatusCode: http.StatusConflict}
+		}
+		if entry.record.Access != "control" {
+			return nil, nil, &HostError{Message: "Peer control access is required", State: StateUnauthorized, StatusCode: http.StatusForbidden}
+		}
+	}
+	return entry, entry.client, nil
+}
+
+func (r *Registry) forwardError(entry *hostEntry, err error) {
+	var hostErr *HostError
+	if !errors.As(err, &hostErr) {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.entries[entry.record.ID] != entry || entry.ctx.Err() != nil {
+		return
+	}
+	entry.state = hostErr.State
+	entry.errorMessage = hostErr.Message
+}
+
+func (r *Registry) ReadApp(ctx context.Context, hostID, appID, resource string, query url.Values, lastEventID string) (*http.Response, error) {
+	entry, client, err := r.connection(hostID, false)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := linkedContext(ctx, entry.ctx)
+	response, err := client.ReadApp(ctx, appID, resource, query, lastEventID)
+	if err != nil {
+		cancel()
+		r.forwardError(entry, err)
+		return nil, err
+	}
+	response.Body = &connectionBody{ReadCloser: response.Body, cancel: cancel}
+	return response, nil
+}
+
+func (r *Registry) Operate(ctx context.Context, hostID, appID, action string) (PeerActionResult, error) {
+	entry, client, err := r.connection(hostID, true)
+	if err != nil {
+		return PeerActionResult{}, err
+	}
+	ctx, cancel := linkedContext(ctx, entry.ctx)
+	defer cancel()
+	result, err := client.Mutate(ctx, appID, action)
+	if err != nil {
+		r.forwardError(entry, err)
+	}
+	return result, err
+}
+
+type connectionBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *connectionBody) Close() error {
+	b.cancel()
+	return b.ReadCloser.Close()
 }

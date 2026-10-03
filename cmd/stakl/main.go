@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/bhujelaayushgc/stakl/internal/api"
 	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/hosts"
 	"github.com/bhujelaayushgc/stakl/internal/manager"
 	"github.com/bhujelaayushgc/stakl/internal/storage"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
@@ -180,6 +181,15 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 		return e
 	}
 	defer db.DB.Close()
+	controllerID, e := db.ControllerID()
+	if e != nil {
+		return e
+	}
+	hostRegistry, e := hosts.NewRegistry(db, controllerID)
+	if e != nil {
+		return e
+	}
+	defer hostRegistry.Close()
 	logPath := filepath.Join(dir, "internal.log")
 	if st, e := os.Stat(logPath); e == nil && st.Size() > 5*1024*1024 {
 		os.Rename(logPath, logPath+".1")
@@ -227,8 +237,10 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	defer os.Remove(filepath.Join(dir, "instance.json"))
 	m := manager.New(c, path, dir, db)
 	m.Notify = api.Notify
-	s := &api.Server{Manager: m, Token: token, Address: clientAddress, BindHost: c.Server.Host, Certificate: certificate, Version: version, Started: time.Now(), Assets: web.Assets()}
+	s := &api.Server{Manager: m, Hosts: hostRegistry, ControllerID: controllerID, Token: token, Address: clientAddress, BindHost: c.Server.Host, Certificate: certificate, Version: version, Started: time.Now(), Assets: web.Assets()}
 	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+	hostRegistry.Start(serverCtx)
 	server := &http.Server{
 		Handler:           s.Handler(),
 		TLSConfig:         tlsConfig,
@@ -266,6 +278,8 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	signal.Stop(sig)
 	watchCancel()
 	serverCancel()
+	s.CancelPeerStreams()
+	hostRegistry.Close()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if e := server.Shutdown(shutdownCtx); e != nil {
 		_ = server.Close()

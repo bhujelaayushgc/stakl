@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/x509"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -232,6 +234,48 @@ func testInstanceAndCLI(t *testing.T, useTLS, dnsOnly bool, bindHost string) {
 		t.Fatal(response.Status)
 	}
 	testPeerTokenCLI(t, inst, grant.ID, grant.Token)
+	// The production controller must construct and start its registry. A saved
+	// registration becomes online without an explicit reconnect request.
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/peer/v1/info" {
+			io.WriteString(w, `{"controller_id":"startup-peer","protocol":1,"access":"read"}`)
+		} else if r.URL.Path == "/api/peer/v1/snapshot" {
+			io.WriteString(w, `{"info":{"controller_id":"startup-peer","protocol":1,"access":"read"},"groups":{},"apps":[]}`)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer remote.Close()
+	body, _ := json.Marshal(map[string]string{"name": "Startup peer", "url": remote.URL, "token": "test-peer-token"})
+	response, err = instanceClient(context.Background(), inst, "POST", "/api/hosts", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatalf("host registry not wired: %d %s", response.StatusCode, registration)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		response, err = instanceClient(context.Background(), inst, "GET", "/api/hosts", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var descriptions []struct{ ID, State string }
+		err = json.NewDecoder(response.Body).Decode(&descriptions)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(descriptions) == 2 && descriptions[0].ID == "local" && descriptions[1].State == "online" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registry did not poll: %+v", descriptions)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func makeDNSOnlyCertificate(t *testing.T, dir string) {
@@ -302,6 +346,7 @@ func TestPeerTokenCLI(t *testing.T) {
 		t.Fatalf("create output: %s %v", output, err)
 	}
 	testPeerTokenCLI(t, inst, grant.ID, grant.Token)
+
 }
 
 func testPeerTokenCLI(t *testing.T, inst instance, id, token string) {
