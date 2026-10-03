@@ -114,28 +114,26 @@ func validTLSHost(host string) bool {
 	return true
 }
 
-// Local instance URLs may use localhost only after all of its addresses are verified loopback.
-func tlsClientHost(cert *x509.Certificate, host string) (string, error) {
+// Select a certificate identity independently of the literal local listener address.
+// DNS identities are never resolved to choose the CLI's dial target.
+func tlsClientServerName(cert *x509.Certificate, host string) (string, error) {
 	if cert.VerifyHostname(host) == nil {
 		return host, nil
 	}
-	if net.ParseIP(host).IsLoopback() && cert.VerifyHostname("localhost") == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, "localhost")
-		if err == nil && len(ips) > 0 {
-			local := true
-			for _, ip := range ips {
-				if !ip.IP.IsLoopback() {
-					local = false
-				}
-			}
-			if local {
-				return "localhost", nil
-			}
+	for _, name := range cert.DNSNames {
+		if strings.HasPrefix(name, "*.") {
+			name = "stakl." + strings.TrimPrefix(name, "*.")
+		}
+		if validTLSHost(name) && cert.VerifyHostname(name) == nil {
+			return name, nil
 		}
 	}
-	return "", fmt.Errorf("server TLS certificate must include a SAN for local CLI address %s (or localhost on loopback); stakl tls init supplies local SANs", host)
+	for _, ip := range cert.IPAddresses {
+		if cert.VerifyHostname(ip.String()) == nil {
+			return ip.String(), nil
+		}
+	}
+	return "", fmt.Errorf("server TLS certificate requires a DNS or IP SAN for local CLI verification")
 }
 
 func instanceClient(ctx context.Context, inst instance, method, path string, body io.Reader) (*http.Response, error) {
@@ -149,6 +147,9 @@ func instanceClient(ctx context.Context, inst instance, method, path string, bod
 		if len(ca) == 0 {
 			return nil, fmt.Errorf("local TLS trust file is empty")
 		}
+	}
+	if inst.TLSServerName != "" {
+		return api.LocalClientWithCA(ctx, inst.URL, inst.Token, method, path, body, ca, inst.TLSServerName)
 	}
 	return api.ClientWithCA(ctx, inst.URL, inst.Token, method, path, body, ca)
 }

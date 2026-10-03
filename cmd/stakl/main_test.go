@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,14 +82,20 @@ func TestHTTPSControllerProcess(t *testing.T) {
 }
 
 func TestHTTPSInstanceAndCLI(t *testing.T) {
-	testInstanceAndCLI(t, true)
+	testInstanceAndCLI(t, true, false, "")
 }
 
 func TestHTTPInstanceAndCLI(t *testing.T) {
-	testInstanceAndCLI(t, false)
+	testInstanceAndCLI(t, false, false, "")
 }
 
-func testInstanceAndCLI(t *testing.T, useTLS bool) {
+func TestHTTPSDNSOnlyInstanceAndCLI(t *testing.T) {
+	for _, host := range []string{"0.0.0.0", "127.0.0.1"} {
+		t.Run(host, func(t *testing.T) { testInstanceAndCLI(t, true, true, host) })
+	}
+}
+
+func testInstanceAndCLI(t *testing.T, useTLS, dnsOnly bool, bindHost string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")
@@ -94,6 +104,21 @@ func testInstanceAndCLI(t *testing.T, useTLS bool) {
 			t.Fatal(err)
 		}
 	}
+	if dnsOnly {
+		makeDNSOnlyCertificate(t, dir)
+		previousResolver := net.DefaultResolver
+		var calls atomic.Int32
+		net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(context.Context, string, string) (net.Conn, error) {
+			calls.Add(1)
+			return nil, fmt.Errorf("DNS resolution must not be used for local CLI")
+		}}
+		t.Cleanup(func() {
+			net.DefaultResolver = previousResolver
+			if calls.Load() != 0 {
+				t.Errorf("local CLI performed %d DNS requests", calls.Load())
+			}
+		})
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +126,9 @@ func testInstanceAndCLI(t *testing.T, useTLS bool) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 	text := fmt.Sprintf("version: 1\nserver: {port: %d, tls_cert_file: tls-cert.pem, tls_key_file: tls-key.pem}\n", port)
+	if dnsOnly {
+		text = fmt.Sprintf("version: 1\nserver: {host: %s, token: 12345678901234567890123456789012, port: %d, tls_cert_file: tls-cert.pem, tls_key_file: tls-key.pem}\n", bindHost, port)
+	}
 	if !useTLS {
 		text = fmt.Sprintf("version: 1\nserver: {port: %d}\n", port)
 	}
@@ -144,12 +172,30 @@ func testInstanceAndCLI(t *testing.T, useTLS bool) {
 		data, _ := os.ReadFile(logFile.Name())
 		t.Fatalf("HTTPS metadata: %+v\n%s", inst, data)
 	}
+	if inst.URL != fmt.Sprintf("%s127.0.0.1:%d", wantScheme, port) {
+		t.Fatalf("instance URL is not pinned to local listener: %s", inst.URL)
+	}
+	wantServerName := ""
+	if dnsOnly {
+		wantServerName = "unresolvable-peer.invalid"
+	}
+	if inst.TLSServerName != wantServerName {
+		t.Fatalf("persisted TLS identity: %q, want %q", inst.TLSServerName, wantServerName)
+	}
 	if _, alive := existing(dir); !alive {
 		t.Fatal("trusted HTTPS instance was not detected")
 	}
 	output, err := captureCLI(func() error { return cli(inst, []string{"status"}) })
 	if err != nil || !strings.Contains(output, "STATE") {
 		t.Fatalf("HTTPS status: %s %v", output, err)
+	}
+	if dnsOnly {
+		identity := inst.TLSServerName
+		inst.TLSServerName = "wrong.invalid"
+		if err := cli(inst, []string{"status"}); err == nil {
+			t.Fatal("CLI accepted a mismatched TLS identity")
+		}
+		inst.TLSServerName = identity
 	}
 	if useTLS {
 		savedCA := inst.CAFile
@@ -170,7 +216,14 @@ func testInstanceAndCLI(t *testing.T, useTLS bool) {
 		t.Fatalf("create: %s %v", output, err)
 	}
 	ca, _ := os.ReadFile(inst.CAFile)
-	response, err := api.ClientWithCA(context.Background(), inst.URL, grant.Token, "GET", "/api/peer/v1/info", nil, ca)
+	if dnsOnly {
+		if _, err := api.ClientWithCA(context.Background(), inst.URL, grant.Token, "GET", "/api/peer/v1/info", nil, ca); err == nil {
+			t.Fatal("ClientWithCA bypassed the URL IP SAN requirement")
+		}
+	}
+	peerInst := inst
+	peerInst.Token = grant.Token
+	response, err := instanceClient(context.Background(), peerInst, "GET", "/api/peer/v1/info", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +232,38 @@ func testInstanceAndCLI(t *testing.T, useTLS bool) {
 		t.Fatal(response.Status)
 	}
 	testPeerTokenCLI(t, inst, grant.ID, grant.Token)
+}
+
+func makeDNSOnlyCertificate(t *testing.T, dir string) {
+	t.Helper()
+	certFile, keyFile := filepath.Join(dir, "tls-cert.pem"), filepath.Join(dir, "tls-key.pem")
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM, err := os.ReadFile(keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certBlock, _ := pem.Decode(certPEM)
+	keyBlock, _ := pem.Decode(keyPEM)
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert.DNSNames = []string{"unresolvable-peer.invalid"}
+	cert.IPAddresses = nil
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, cert.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPeerTokenCLI(t *testing.T) {

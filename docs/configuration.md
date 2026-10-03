@@ -73,7 +73,7 @@ server:
   tls_key_file: tls-key.pem
 ```
 
-Start with `stakl --config /path/to/config.yml --no-browser`. Local CLI commands automatically trust the configured public certificate and verify its SAN. Custom certificates must cover the local CLI address, normally `127.0.0.1` or `::1`; `localhost` also works when it resolves entirely to loopback. A DNS-only certificate for a remote name cannot replace these local SANs on a wildcard listener. Server binding, token, and TLS setting changes require a controller restart; replacing certificate files also requires restarting to load them.
+Start with `stakl --config /path/to/config.yml --no-browser`. Local CLI commands automatically trust the configured public certificate and verify its SAN. Custom DNS-only certificates also work on IP or wildcard listeners: the CLI verifies a certificate DNS identity while keeping the connection pinned to the configured listener IP, without resolving or routing administration traffic to that DNS name. Server binding, token, and TLS setting changes require a controller restart; replacing certificate files also requires restarting to load them.
 
 Issue a scoped credential from the running controller:
 
@@ -84,7 +84,7 @@ stakl peer tokens list
 stakl peer tokens revoke GRANT_ID
 ```
 
-Creation prints metadata and the token once. Lists contain only metadata. Transfer the **public `tls-cert.pem`** to the connecting machine as its trusted PEM, together with the scoped token and `https://peer.example:49152` endpoint. Certificate chains and DNS/IP SANs must verify; there is no insecure TLS option. A headless peer does not require its certificate to be installed in the hub browser. `stakl open` opens the local HTTPS dashboard; using the self-signed certificate in that browser requires trusting the public certificate there.
+Creation prints metadata and the token once. Lists contain only metadata. Transfer the **public `tls-cert.pem`** to the connecting machine as its trusted PEM, together with the scoped token and `https://peer.example:49152` endpoint. Certificate chains and DNS/IP SANs must verify; there is no insecure TLS option. A headless peer does not require its certificate to be installed in the hub browser. `stakl open` opens the local HTTPS dashboard; the generated certificate includes its local IP SAN, and using that self-signed certificate in a browser requires trusting the public certificate there. For a custom DNS-only certificate, browser access instead needs a certificate-covered hostname that maps to the listener. The local CLI's separate TLS identity does not change browser certificate verification.
 
 Keep `tls-key.pem` on the peer and back it up separately; `stakl backup` does not include TLS files. State database backups retain controller identity and peer credentials. Do not copy a state database to create a second independent controller.
 

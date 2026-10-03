@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func TestTLSLocalSANSelection(t *testing.T) {
+func TestTLSLocalIdentitySelection(t *testing.T) {
 	for _, tc := range []struct {
 		cert       *x509.Certificate
 		host, want string
@@ -23,15 +23,18 @@ func TestTLSLocalSANSelection(t *testing.T) {
 		{&x509.Certificate{IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}}, "127.0.0.1", "127.0.0.1", false},
 		{&x509.Certificate{DNSNames: []string{"localhost"}}, "127.0.0.1", "localhost", false},
 		{&x509.Certificate{IPAddresses: []net.IP{net.ParseIP("::1")}}, "::1", "::1", false},
-		{&x509.Certificate{DNSNames: []string{"peer.example"}}, "127.0.0.1", "", true},
+		{&x509.Certificate{DNSNames: []string{"peer.example"}}, "127.0.0.1", "peer.example", false},
+		{&x509.Certificate{DNSNames: []string{"*.example.com"}}, "127.0.0.1", "stakl.example.com", false},
+		{&x509.Certificate{IPAddresses: []net.IP{net.ParseIP("192.0.2.42")}}, "127.0.0.1", "192.0.2.42", false},
+		{&x509.Certificate{}, "127.0.0.1", "", true},
 	} {
-		host, err := tlsClientHost(tc.cert, tc.host)
+		host, err := tlsClientServerName(tc.cert, tc.host)
 		if tc.fail {
 			if err == nil || !strings.Contains(err.Error(), "SAN") {
-				t.Fatalf("missing local SAN accepted: %s %v", host, err)
+				t.Fatalf("missing certificate SAN accepted: %s %v", host, err)
 			}
 		} else if err != nil || host != tc.want {
-			t.Fatalf("local CLI address: %s %v", host, err)
+			t.Fatalf("verified TLS identity: %s %v", host, err)
 		}
 	}
 }

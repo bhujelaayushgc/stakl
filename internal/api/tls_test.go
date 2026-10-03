@@ -1,21 +1,92 @@
 package api
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestHTTPSLocalClientVerifiedIdentity(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("local administrator redirect followed") }))
+	defer target.Close()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS.ServerName != "example.com" {
+			t.Errorf("TLS identity: %s", r.TLS.ServerName)
+		}
+		if r.Header.Get("Authorization") != "Bearer local-admin" {
+			t.Error("missing local administrator credential")
+		}
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, target.URL, 307)
+			return
+		}
+		w.WriteHeader(204)
+	}))
+	defer server.Close()
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	previousResolver := net.DefaultResolver
+	var calls atomic.Int32
+	net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(context.Context, string, string) (net.Conn, error) {
+		calls.Add(1)
+		return nil, fmt.Errorf("external DNS must never resolve")
+	}}
+	defer func() {
+		net.DefaultResolver = previousResolver
+		if calls.Load() != 0 {
+			t.Errorf("local client performed %d DNS requests", calls.Load())
+		}
+	}()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("local administrator request used inherited proxy")
+		w.WriteHeader(418)
+	}))
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	defaultTransport := http.DefaultTransport.(*http.Transport)
+	previousProxy := defaultTransport.Proxy
+	defaultTransport.Proxy = http.ProxyURL(proxyURL)
+	defer func() { defaultTransport.Proxy = previousProxy }()
+	response, err := LocalClientWithCA(t.Context(), server.URL, "local-admin", "GET", "/", nil, ca, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != 204 {
+		t.Fatal(response.Status)
+	}
+	response, err = LocalClientWithCA(t.Context(), server.URL, "local-admin", "GET", "/redirect", nil, ca, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != 307 {
+		t.Fatal(response.Status)
+	}
+	if _, err := LocalClientWithCA(t.Context(), server.URL, "local-admin", "GET", "/", nil, ca, "wrong.invalid"); err == nil {
+		t.Fatal("wrong verified identity accepted")
+	}
+	if _, err := LocalClientWithCA(t.Context(), server.URL, "local-admin", "GET", "/", nil, nil, "example.com"); err == nil {
+		t.Fatal("untrusted local certificate accepted")
+	}
+	if _, err := LocalClientWithCA(t.Context(), strings.Replace(server.URL, "127.0.0.1", "example.com", 1), "local-admin", "GET", "/", nil, ca, "example.com"); err == nil {
+		t.Fatal("non-IP listener target accepted")
+	}
+}
 
 func TestTLSLoadsValidPairAndRejectsInvalidMaterial(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

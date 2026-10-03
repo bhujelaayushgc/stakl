@@ -32,10 +32,11 @@ import (
 var version = "dev"
 
 type instance struct {
-	URL    string `json:"url"`
-	Token  string `json:"token"`
-	PID    int    `json:"pid"`
-	CAFile string `json:"ca_file,omitempty"`
+	URL           string `json:"url"`
+	Token         string `json:"token"`
+	PID           int    `json:"pid"`
+	CAFile        string `json:"ca_file,omitempty"`
+	TLSServerName string `json:"tls_server_name,omitempty"`
 }
 
 func main() {
@@ -207,15 +208,19 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 		host = "::1"
 	}
 	scheme := "http"
+	tlsServerName := ""
 	if certificate != nil {
 		scheme = "https"
-		host, e = tlsClientHost(certificate, host)
-		if e != nil {
-			return e
+		identity, identityErr := tlsClientServerName(certificate, host)
+		if identityErr != nil {
+			return identityErr
+		}
+		if identity != host {
+			tlsServerName = identity
 		}
 	}
 	clientAddress := net.JoinHostPort(host, strconv.Itoa(listenPort))
-	inst = instance{URL: scheme + "://" + clientAddress, Token: token, PID: os.Getpid(), CAFile: c.Server.TLSCertFile}
+	inst = instance{URL: scheme + "://" + clientAddress, Token: token, PID: os.Getpid(), CAFile: c.Server.TLSCertFile, TLSServerName: tlsServerName}
 	if e = supervisor.AtomicJSON(filepath.Join(dir, "instance.json"), inst); e != nil {
 		return e
 	}

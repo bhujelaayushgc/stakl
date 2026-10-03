@@ -43,7 +43,27 @@ func LoadTLS(certFile, keyFile string) (*tls.Config, *x509.Certificate, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}, cert, nil
 }
 
+// ClientWithCA verifies the URL hostname using system roots plus optional CA PEM.
 func ClientWithCA(ctx context.Context, address, token, method, path string, body io.Reader, caPEM []byte) (*http.Response, error) {
+	return clientWithCA(ctx, address, token, method, path, body, caPEM, "")
+}
+
+// LocalClientWithCA is for the local instance CLI only. The literal listener IP
+// stays the dial target while serverName is verified against the trusted certificate.
+// Peer clients must use ClientWithCA, which verifies the URL's hostname.
+func LocalClientWithCA(ctx context.Context, address, token, method, path string, body io.Reader, caPEM []byte, serverName string) (*http.Response, error) {
+	u, err := url.Parse(address)
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Scheme != "https" || ip == nil || ip.IsUnspecified() {
+		return nil, fmt.Errorf("local HTTPS client requires a literal listener IP address")
+	}
+	return clientWithCA(ctx, address, token, method, path, body, caPEM, serverName)
+}
+
+func clientWithCA(ctx context.Context, address, token, method, path string, body io.Reader, caPEM []byte, serverName string) (*http.Response, error) {
 	u, err := url.Parse(address)
 	if err != nil {
 		return nil, err
@@ -64,6 +84,18 @@ func ClientWithCA(ctx context.Context, address, token, method, path string, body
 	transport.TLSHandshakeTimeout = 5 * time.Second
 	transport.ResponseHeaderTimeout = 5 * time.Second
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	if serverName != "" {
+		transport.TLSClientConfig.ServerName = serverName
+		port := u.Port()
+		if port == "" {
+			port = "443"
+		}
+		dialAddress := net.JoinHostPort(u.Hostname(), port)
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, dialAddress)
+		}
+	}
 	if len(caPEM) > 0 {
 		roots, err := x509.SystemCertPool()
 		if err != nil {
