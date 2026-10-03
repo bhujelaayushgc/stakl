@@ -34,6 +34,12 @@ type Server struct {
 	Assets                  fs.FS
 	BindHost                string
 	saveMu                  sync.Mutex
+	ControllerID            string
+	controllerOnce          sync.Once
+	controllerErr           error
+	peerMu                  sync.Mutex
+	peerStreams             map[string]map[*peerStream]struct{}
+	peerClosed              bool
 }
 
 func JSON(w http.ResponseWriter, v any) {
@@ -46,7 +52,16 @@ func errorJSON(w http.ResponseWriter, e error, status int) {
 	JSON(w, map[string]string{"error": e.Error()})
 }
 func (s *Server) Handler() http.Handler {
+	s.controllerOnce.Do(func() {
+		if s.ControllerID == "" && s.Manager != nil && s.Manager.Store != nil {
+			s.ControllerID, s.controllerErr = s.Manager.Store.ControllerID()
+		}
+		if s.ControllerID == "" && s.controllerErr == nil {
+			s.controllerErr = fmt.Errorf("controller identity unavailable")
+		}
+	})
 	mux := http.NewServeMux()
+	s.peerRoutes(mux)
 	mux.HandleFunc("GET /api/apps", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Views()) })
 	mux.HandleFunc("GET /api/apps/{id}", s.app)
 	mux.HandleFunc("POST /api/apps/{id}/{action}", s.action)
@@ -119,6 +134,13 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if strings.HasPrefix(r.URL.Path, "/api/peer/v1/") {
+				peerRequest, ok := s.authenticatePeer(w, r)
+				if ok {
+					mux.ServeHTTP(w, peerRequest)
+				}
+				return
+			}
 			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if cookie, e := r.Cookie(s.cookieName()); e == nil && token == "" {
 				token = cookie.Value

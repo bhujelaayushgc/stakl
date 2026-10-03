@@ -45,7 +45,12 @@ CREATE INDEX IF NOT EXISTS health_app ON health(app,id);`)
 		db.Close()
 		return nil, e
 	}
-	return &Store{db}, nil
+	s := &Store{db}
+	if e = s.migrateHosts(); e != nil {
+		db.Close()
+		return nil, e
+	}
+	return s, nil
 }
 func (s *Store) Save(id string, v any) error {
 	b, e := json.Marshal(v)
