@@ -33,6 +33,14 @@ curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/inst
 curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/install.sh | STAKL_INSTALL_DIR=/usr/local/bin sh
 ```
 
+Beta releases from `dev` are GitHub prereleases and are excluded from the default installer. To install a published beta, select its version explicitly, for example:
+
+```sh
+curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/install.sh | STAKL_VERSION=v0.2.0-beta.1 sh
+```
+
+Release tags use `vX.Y.Z` for stable releases and `vX.Y.Z-beta.N` for betas (`N` starts at 1). Create the tag at the intended commit and push the tag to publish after CI passes. The workflow verifies that a stable commit is included in `main`, or a beta commit in `dev`, and always builds the tagged commit. Normal branch pushes produce CI artifacts without publishing a release.
+
 The installer never starts Stakl or changes `~/.stakl`. To uninstall the executable, remove `~/.local/bin/stakl`; configuration and runtime history remain intact.
 
 For a manual installation, download the archive for your platform and `checksums.txt` from GitHub Releases, verify the archive, then extract it:
