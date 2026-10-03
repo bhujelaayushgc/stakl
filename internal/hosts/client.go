@@ -239,8 +239,8 @@ func (c *Client) Mutate(ctx context.Context, appID, action string) (PeerActionRe
 		err.(*HostError).OutcomeUnknown = true
 		return PeerActionResult{}, err
 	}
-	if result.Results == nil {
-		return PeerActionResult{}, &HostError{Message: "Peer lifecycle outcomes are missing", State: StateIncompatible, StatusCode: http.StatusOK, OutcomeUnknown: true}
+	if strings.TrimSpace(result.Results[appID]) == "" {
+		return PeerActionResult{}, &HostError{Message: "Peer lifecycle outcome is missing", State: StateIncompatible, StatusCode: http.StatusOK, OutcomeUnknown: true}
 	}
 	return result, nil
 }

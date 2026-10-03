@@ -404,16 +404,55 @@ func TestPeerIdentityProtocolAndSafeErrors(t *testing.T) {
 }
 
 func TestPeerMutationRejectsMissingOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		present bool
+		results map[string]string
+	}{
+		{name: "missing"},
+		{name: "null", present: true},
+		{name: "empty", present: true, results: map[string]string{}},
+		{name: "unrelated_only", present: true, results: map[string]string{"dependency": "already running"}},
+		{name: "empty_target", present: true, results: map[string]string{"api": "", "dependency": "already running"}},
+		{name: "whitespace_target", present: true, results: map[string]string{"api": " \t\n", "dependency": "already running"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var postAttempts atomic.Int32
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					json.NewEncoder(w).Encode(peerInfo())
+					return
+				}
+				postAttempts.Add(1)
+				response := map[string]any{"info": peerInfo()}
+				if tc.present {
+					response["results"] = tc.results
+				}
+				json.NewEncoder(w).Encode(response)
+			}))
+			defer s.Close()
+			_, err := peerClient(t, s.URL, "").Mutate(context.Background(), "api", "start")
+			assertHostError(t, err, StateIncompatible, true)
+			if postAttempts.Load() != 1 {
+				t.Fatal("invalid lifecycle response caused a retry")
+			}
+		})
+	}
+}
+
+func TestPeerMutationPreservesTargetAndDependencyOutcomes(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(peerInfo())
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"info": peerInfo()})
+		json.NewEncoder(w).Encode(LifecycleResponse{Info: peerInfo(), Results: map[string]string{"api": "started", "dependency": "already running"}})
 	}))
 	defer s.Close()
-	_, err := peerClient(t, s.URL, "").Mutate(context.Background(), "api", "start")
-	assertHostError(t, err, StateIncompatible, true)
+	result, err := peerClient(t, s.URL, "").Mutate(context.Background(), "api", "start")
+	if err != nil || result.Results["api"] != "started" || result.Results["dependency"] != "already running" || len(result.Results) != 2 {
+		t.Fatalf("target/dependency outcomes = %+v, error = %v", result, err)
+	}
 }
 
 func TestPeerFixedPathsAndLifecycleResult(t *testing.T) {
@@ -428,7 +467,7 @@ func TestPeerFixedPathsAndLifecycleResult(t *testing.T) {
 		}
 		if r.Method == http.MethodPost {
 			actionPath = r.URL.EscapedPath()
-			json.NewEncoder(w).Encode(LifecycleResponse{Info: peerInfo(), Results: map[string]string{"api": "started", "dependency": "already running"}})
+			json.NewEncoder(w).Encode(LifecycleResponse{Info: peerInfo(), Results: map[string]string{"api/../secret?x#y": "started", "dependency": "already running"}})
 			return
 		}
 		readPath, query, lastID = r.URL.EscapedPath(), r.URL.RawQuery, r.Header.Get("Last-Event-ID")
@@ -446,7 +485,7 @@ func TestPeerFixedPathsAndLifecycleResult(t *testing.T) {
 		t.Fatalf("unsafe/lost read path or stream metadata: %q %q %q %v", readPath, query, lastID, err)
 	}
 	result, err := c.Mutate(context.Background(), "api/../secret?x#y", "start")
-	if err != nil || result.Results["dependency"] != "already running" || actionPath != "/api/peer/v1/apps/api%2F..%2Fsecret%3Fx%23y/start" {
+	if err != nil || result.Results["api/../secret?x#y"] != "started" || result.Results["dependency"] != "already running" || actionPath != "/api/peer/v1/apps/api%2F..%2Fsecret%3Fx%23y/start" {
 		t.Fatalf("lifecycle result/path = %+v, %q, %v", result, actionPath, err)
 	}
 	for _, resource := range []string{"config", "https://example.com", "../history", ""} {
