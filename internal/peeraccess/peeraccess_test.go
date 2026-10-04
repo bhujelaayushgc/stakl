@@ -313,3 +313,41 @@ func TestDamagedSettingsRecoverOnlyOnExplicitDisable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLiveEndpointReportsAddressLossAndCertificateExpiry(t *testing.T) {
+	c := fixture(t, filepath.Join(t.TempDir(), "peer-access.json"), http.NotFoundHandler())
+	certPEM, keyPEM, err := tlsutil.Generate([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert.NotAfter = time.Now().Add(3 * time.Second).Truncate(time.Second)
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, cert.PublicKey, pair.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.settings.CertificatePEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	c.settings.PrivateKeyPEM = string(keyPEM)
+	if _, err := c.Enable(context.Background(), EnableRequest{Address: "127.0.0.1", Port: freePort(t)}); err != nil {
+		t.Fatal(err)
+	}
+	c.addresses = func() ([]string, error) { return []string{}, nil }
+	if status := c.Status(); !status.Running || !strings.Contains(status.Error, "address") {
+		t.Fatalf("address loss hidden: %+v", status)
+	}
+	c.addresses = func() ([]string, error) { return []string{"127.0.0.1"}, nil }
+	if err := c.Status().Error; err != "" {
+		t.Fatalf("recovered address still unhealthy: %s", err)
+	}
+	time.Sleep(time.Until(cert.NotAfter) + 10*time.Millisecond)
+	if status := c.Status(); !status.Running || !strings.Contains(status.Error, "certificate") {
+		t.Fatalf("expiry hidden: %+v", status)
+	}
+}

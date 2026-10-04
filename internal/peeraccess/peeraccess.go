@@ -128,6 +128,18 @@ func (c *Controller) statusLocked() Status {
 		addresses = []string{}
 	}
 	s := Status{Enabled: c.settings.Enabled, Running: c.live != nil, Address: c.settings.Address, Port: c.settings.Port, HasCertificate: c.settings.CertificatePEM != "" || c.settings.PrivateKeyPEM != "", Addresses: addresses, Error: c.lastError}
+	if s.Running && s.Error == "" && err == nil {
+		available := false
+		for _, address := range addresses {
+			if address == s.Address {
+				available = true
+				break
+			}
+		}
+		if !available {
+			s.Error = "The selected network address is no longer available. Disable access and choose an available address."
+		}
+	}
 	if c.settings.Address != "" {
 		s.Endpoint = "https://" + net.JoinHostPort(c.settings.Address, strconv.Itoa(c.settings.Port))
 	}
@@ -136,6 +148,9 @@ func (c *Controller) statusLocked() Status {
 		if cert, e := x509.ParseCertificate(block.Bytes); e == nil {
 			s.CAPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 			s.CertificateExpiresAt = cert.NotAfter.UTC().Format(time.RFC3339)
+			if s.Running && s.Error == "" && !time.Now().Before(cert.NotAfter) {
+				s.Error = "The peer certificate has expired. Disable access, enable with certificate replacement, and update trust on connected dashboards."
+			}
 		}
 	}
 	if err != nil && s.Error == "" {
