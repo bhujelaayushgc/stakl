@@ -339,8 +339,18 @@ export function AppForm({
   disabled,
   onChange,
 }: AppFormProps) {
-  const [customID, setCustomID] = useState(false);
-  const [customGroupID, setCustomGroupID] = useState(false);
+  const [customID, setCustomID] = useState(
+    () =>
+      creating &&
+      draft.id !==
+        availableID(String(draft.values.name || ""), Object.keys(apps)),
+  );
+  const [customGroupID, setCustomGroupID] = useState(
+    () =>
+      !!draft.newGroup &&
+      draft.newGroup.id !==
+        availableID(draft.newGroup.name, Object.keys(groups), "group"),
+  );
   const [pendingType, setPendingType] = useState<ReturnType<
     typeof changeAppType
   > | null>(null);

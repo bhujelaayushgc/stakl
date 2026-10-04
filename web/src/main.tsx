@@ -49,6 +49,8 @@ import {
 import Prism from "prismjs";
 import "prismjs/components/prism-yaml";
 import YAML from "yaml";
+import { AppEditor } from "./AppEditor";
+import type { DiscoverySuggestion } from "./app-config";
 import {
   App,
   HostEnvelope,
@@ -202,7 +204,11 @@ export function AppShell() {
     [type, setType] = useState(() => route().type),
     [favorites, setFavorites] = useState(() => route().favorites),
     [configDirty, setConfigDirty] = useState(false),
-    [discoverDirty, setDiscoverDirty] = useState(false),
+    [editorDirty, setEditorDirty] = useState(false),
+    [appEditor, setAppEditor] = useState<{
+      appID?: string;
+      suggestion?: DiscoverySuggestion;
+    } | null>(null),
     [palette, setPalette] = useState(false),
     [confirm, setConfirm] = useState<{
       title: string;
@@ -235,8 +241,18 @@ export function AppShell() {
   const historyIndex = useRef(0);
   const currentUrl = useRef(window.location.href);
   const revertingPop = useRef(false);
-  const dirtyPage = useRef({ page, configDirty, discoverDirty });
-  dirtyPage.current = { page, configDirty, discoverDirty };
+  const dirtyPage = useRef({
+    page,
+    configDirty,
+    editorDirty,
+    editorOpen: !!appEditor,
+  });
+  dirtyPage.current = {
+    page,
+    configDirty,
+    editorDirty,
+    editorOpen: !!appEditor,
+  };
   const writeUrl = (url: URL, push = false, detailFrom = false) => {
     if (url.href === window.location.href) return;
     if (push) historyIndex.current += 1;
@@ -266,9 +282,8 @@ export function AppShell() {
       const next = route();
       const dirty = dirtyPage.current;
       if (
-        next.page !== dirty.page &&
-        ((dirty.page === "config" && dirty.configDirty) ||
-          (dirty.page === "discover" && dirty.discoverDirty)) &&
+        (next.page !== dirty.page || dirty.editorOpen) &&
+        ((dirty.page === "config" && dirty.configDirty) || dirty.editorDirty) &&
         !window.confirm(
           dirty.page === "config"
             ? "Discard unsaved configuration changes?"
@@ -290,6 +305,8 @@ export function AppShell() {
       }
       historyIndex.current = event.state?.staklIndex ?? 0;
       currentUrl.current = window.location.href;
+      setAppEditor(null);
+      setEditorDirty(false);
       setPage(next.page);
       setSelected(next.selected);
       setScope(next.scope);
@@ -532,7 +549,21 @@ export function AppShell() {
       refresh();
     }
   };
-  const openDetail = (id: string, tab = "Overview", hostID = "local") => {
+  const openDetail = (
+    id: string,
+    tab = "Overview",
+    hostID = "local",
+    saved = false,
+  ) => {
+    if (
+      appEditor &&
+      editorDirty &&
+      !saved &&
+      !window.confirm("Discard your unsaved application changes?")
+    )
+      return;
+    setAppEditor(null);
+    setEditorDirty(false);
     writeUrl(
       routeUrl({
         app: id,
@@ -692,10 +723,9 @@ export function AppShell() {
   };
   const nav = (p: string, saved = false) => {
     if (
-      p !== page &&
+      (p !== page || !!appEditor) &&
       !saved &&
-      ((page === "config" && configDirty) ||
-        (page === "discover" && discoverDirty)) &&
+      ((page === "config" && configDirty) || editorDirty) &&
       !window.confirm(
         page === "config"
           ? "Discard unsaved configuration changes?"
@@ -704,7 +734,8 @@ export function AppShell() {
     )
       return;
     if (page === "config") setConfigDirty(false);
-    if (page === "discover") setDiscoverDirty(false);
+    setEditorDirty(false);
+    setAppEditor(null);
     writeUrl(
       routeUrl({
         view: p === "dashboard" ? null : p,
@@ -925,13 +956,44 @@ export function AppShell() {
               </div>
             </div>
           )}
-          {page === "dashboard" && (
+          {appEditor && (
+            <AppEditor
+              appID={appEditor.appID}
+              suggestion={appEditor.suggestion}
+              onDirtyChange={setEditorDirty}
+              onOpenConfig={() => nav("config")}
+              onCancel={() => {
+                const id = appEditor.appID;
+                setAppEditor(null);
+                setEditorDirty(false);
+                if (id) openDetail(id, "Configuration", "local", true);
+              }}
+              onSaved={(id) => {
+                const editing = !!appEditor.appID;
+                setError("");
+                setNotice(
+                  "Application configuration saved, backed up, and reloaded",
+                );
+                void refresh();
+                nav("dashboard", true);
+                if (editing) openDetail(id, "Configuration", "local", true);
+              }}
+            />
+          )}
+          {page === "dashboard" && !appEditor && (
             <>
               <PageHeader
                 title="Applications"
                 actions={
                   scope === "local" && (
                     <>
+                      <button
+                        className="button primary"
+                        onClick={() => setAppEditor({})}
+                      >
+                        <Plus size={15} aria-hidden="true" />
+                        Add app
+                      </button>
                       <button
                         className="button"
                         onClick={() => nav("discover")}
@@ -1310,15 +1372,10 @@ export function AppShell() {
               }}
             />
           )}
-          {page === "discover" && (
+          {page === "discover" && !appEditor && (
             <DiscoverPage
-              cfg={cfg}
-              onAdded={() => {
-                refresh();
-                nav("dashboard", true);
-              }}
+              onReview={(suggestion) => setAppEditor({ suggestion })}
               onError={setError}
-              onDirtyChange={setDiscoverDirty}
             />
           )}
           {page === "activity" && (
@@ -1376,6 +1433,10 @@ export function AppShell() {
                   key={identity(current)}
                   app={current}
                   localControls={scope === "local"}
+                  onEdit={() => {
+                    nav("dashboard", true);
+                    setAppEditor({ appID: current.config.id });
+                  }}
                   portScan={ports}
                   tab={detailTab}
                   setTab={changeDetailTab}
@@ -1711,6 +1772,7 @@ function AppRow({
 function Detail({
   app: a,
   localControls,
+  onEdit,
   portScan,
   tab,
   setTab,
@@ -1720,6 +1782,7 @@ function Detail({
 }: {
   app: App;
   localControls: boolean;
+  onEdit: () => void;
   portScan: ReturnType<typeof usePortScan>;
   tab: string;
   setTab: (s: string) => void;
@@ -2032,8 +2095,14 @@ function Detail({
             <p className="muted">
               {remote
                 ? "Redacted peer configuration snapshot. Edit configuration on the peer controller."
-                : "Effective configuration. Environment values are redacted. Edit the source YAML from Configuration."}
+                : "Effective configuration. Environment values are redacted. Use Edit app to change the source settings."}
             </p>
+            {!remote && (
+              <button className="button" onClick={onEdit}>
+                <Settings2 size={15} aria-hidden="true" />
+                Edit app
+              </button>
+            )}
             <pre className="code-block config-code">
               {JSON.stringify(a.effective_config || a.config, null, 2)}
             </pre>
@@ -2656,120 +2725,36 @@ function ConfigPage({
   );
 }
 function DiscoverPage({
-  cfg,
-  onAdded,
+  onReview,
   onError,
-  onDirtyChange,
 }: {
-  cfg: Config | null;
-  onAdded: () => void;
-  onError: (s: string) => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onReview: (suggestion: DiscoverySuggestion) => void;
+  onError: (message: string) => void;
 }) {
-  const [path, setPath] = useState(""),
-    [rows, setRows] = useState<
-      {
-        path: string;
-        type: string;
-        command: string;
-        indicator: string;
-        name: string;
-      }[]
-    >([]),
-    [busy, setBusy] = useState(false),
-    [scanned, setScanned] = useState(false),
-    [truncated, setTruncated] = useState(false),
-    [adding, setAdding] = useState<string | null>(null),
-    [draft, setDraft] = useState(""),
-    [originalDraft, setOriginalDraft] = useState(""),
-    [scanError, setScanError] = useState(""),
-    [draftError, setDraftError] = useState("");
+  const [path, setPath] = useState("");
+  const [rows, setRows] = useState<DiscoverySuggestion[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const [scanError, setScanError] = useState("");
   const scanErrorRef = useRef<HTMLParagraphElement>(null);
-  const draftErrorRef = useRef<HTMLParagraphElement>(null);
-  const draftDirty = !!adding && draft !== originalDraft;
-  useEffect(() => onDirtyChange(draftDirty), [draftDirty, onDirtyChange]);
-  useEffect(() => {
-    const guard = (event: BeforeUnloadEvent) => {
-      if (draftDirty) {
-        event.preventDefault();
-        event.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", guard);
-    return () => window.removeEventListener("beforeunload", guard);
-  }, [draftDirty]);
   useEffect(() => {
     if (scanError) scanErrorRef.current?.focus();
   }, [scanError]);
-  useEffect(() => {
-    if (draftError) draftErrorRef.current?.focus();
-  }, [draftError]);
   const scan = async () => {
     setBusy(true);
     setScanError("");
     try {
-      const d = await request<{ suggestions: typeof rows; truncated: boolean }>(
-        "/discover",
-        { path },
-      );
-      setRows(d.suggestions);
+      const data = await request<{
+        suggestions: DiscoverySuggestion[];
+        truncated: boolean;
+      }>("/discover", { path });
+      setRows(data.suggestions);
       setScanned(true);
-      setTruncated(d.truncated);
+      setTruncated(data.truncated);
     } catch (e) {
       setScanError(
         `Could not scan ${path}: ${(e as Error).message}. Check the directory path and permissions, then try again.`,
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-  const prepare = async (row: (typeof rows)[number]) => {
-    try {
-      const c = await request<Config>("/config?raw=true");
-      const doc = YAML.parseDocument(c.raw || "");
-      let id = row.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-      if (!id) id = "app";
-      let n = 2;
-      const base = id;
-      while (doc.hasIn(["apps", id])) id = base + "-" + n++;
-      const app: Record<string, unknown> = {
-        name: row.name,
-        type: row.type,
-        cwd: row.path,
-      };
-      if (row.type === "docker-compose")
-        app.docker = { compose_file: row.indicator, project_name: id };
-      else app.start = { command: row.command };
-      const suggestion = YAML.stringify({ [id]: app });
-      setDraft(suggestion);
-      setOriginalDraft(suggestion);
-      setDraftError("");
-      setAdding(row.path);
-    } catch (e) {
-      onError(
-        `Could not prepare ${row.name}: ${(e as Error).message}. Check that the configuration file is readable.`,
-      );
-    }
-  };
-  const add = async () => {
-    setBusy(true);
-    setDraftError("");
-    try {
-      const c = await request<Config>("/config?raw=true");
-      const doc = YAML.parseDocument(c.raw || "");
-      const fragment = YAML.parse(draft);
-      for (const [id, a] of Object.entries(fragment)) {
-        if (doc.hasIn(["apps", id])) throw Error(`App ${id} already exists`);
-        doc.setIn(["apps", id], a);
-      }
-      await request("/config/save", {
-        yaml: String(doc),
-        revision: c.revision,
-      });
-      onAdded();
-    } catch (e) {
-      setDraftError(
-        `Could not add application: ${(e as Error).message}. Review the YAML and try again.`,
       );
     } finally {
       setBusy(false);
@@ -2796,13 +2781,13 @@ function DiscoverPage({
               setPath(e.target.value);
               setScanError("");
             }}
-            onKeyDown={(e) => e.key === "Enter" && path && scan()}
+            onKeyDown={(e) => e.key === "Enter" && path && void scan()}
           />
         </label>
         <button
           className="button primary"
           disabled={!path || busy}
-          onClick={scan}
+          onClick={() => void scan()}
         >
           {busy ? (
             <LoaderCircle className="spin" size={15} aria-hidden="true" />
@@ -2828,60 +2813,7 @@ function DiscoverPage({
         Go, Rust, Justfile, and Makefile projects. Dependencies and hidden
         version-control directories are skipped. Nothing runs automatically.
       </p>
-      {adding ? (
-        <div className="discovery-review">
-          <h2>Review application</h2>
-          <p>
-            Check the suggested command before adding it. Detection finds
-            project files, not necessarily the correct entry point.
-          </p>
-          <textarea
-            aria-label="New application YAML"
-            name="new-application-yaml"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={!!draftError}
-            aria-describedby={draftError ? "discover-draft-error" : undefined}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setDraftError("");
-            }}
-          />
-          {draftError && (
-            <p
-              id="discover-draft-error"
-              className="alert error"
-              role="alert"
-              tabIndex={-1}
-              ref={draftErrorRef}
-            >
-              {draftError}
-            </p>
-          )}
-          <div className="inline-actions">
-            <button
-              className="button"
-              onClick={() => {
-                if (
-                  !draftDirty ||
-                  window.confirm("Discard your edited application draft?")
-                )
-                  setAdding(null);
-              }}
-            >
-              Cancel
-            </button>
-            <button className="button primary" disabled={busy} onClick={add}>
-              <Plus size={15} aria-hidden="true" />
-              Add to configuration
-            </button>
-          </div>
-          <small>
-            Adding this application saves to {cfg?.path} with a backup.
-          </small>
-        </div>
-      ) : scanned || rows.length ? (
+      {scanned || rows.length ? (
         <div className="discovery-results workstation-list">
           {rows.length > 0 && <h2 className="sr-only">Discovered projects</h2>}
           {rows.map((row) => (
@@ -2901,9 +2833,15 @@ function DiscoverPage({
                   {row.command ? " · " + row.command : ""}
                 </span>
               </div>
-              <button className="button small" onClick={() => prepare(row)}>
+              <button
+                className="button small"
+                onClick={() => {
+                  onError("");
+                  onReview(row);
+                }}
+              >
                 <Plus size={14} aria-hidden="true" />
-                Review & add
+                Review &amp; add
               </button>
             </div>
           ))}
@@ -2915,8 +2853,8 @@ function DiscoverPage({
               headingLevel={2}
             >
               <p>
-                Try a directory closer to your projects, or add applications
-                directly in YAML.
+                Try a directory closer to your projects, or use Add app on
+                Applications.
               </p>
             </EmptyState>
           )}
@@ -2931,6 +2869,7 @@ function DiscoverPage({
     </>
   );
 }
+
 function SystemPage() {
   const [info, setInfo] = useState<Record<string, unknown> | null>(null),
     [docker, setDocker] = useState<{
