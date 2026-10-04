@@ -39,7 +39,21 @@ function setup(failEdit = false) {
     calls.push({ path, body });
     let data: unknown = {};
     let status = 200;
-    if (path === "/api/hosts") {
+    if (path === "/api/peer-access") {
+      data = {
+        enabled: false,
+        running: false,
+        address: "",
+        port: 49153,
+        endpoint: "",
+        ca_pem: "",
+        certificate_expires_at: "",
+        has_certificate: false,
+        addresses: ["192.168.1.20"],
+        error: "",
+        primary_network_access: false,
+      };
+    } else if (path === "/api/hosts") {
       if (body) {
         const added = { ...peer, id: "new", name: body.name, url: body.url };
         hosts = [...hosts, added];

@@ -268,6 +268,20 @@ export interface PeerGrant {
   access: "read" | "control";
   created_at: string;
 }
+export type PeerAccessStatus = {
+  enabled: boolean;
+  running: boolean;
+  address: string;
+  port: number;
+  endpoint: string;
+  ca_pem: string;
+  certificate_expires_at: string;
+  has_certificate: boolean;
+  addresses: string[];
+  error: string;
+  primary_network_access: boolean;
+};
+
 export class RequestError extends Error {
   state?: HostState;
   outcome_unknown: boolean;

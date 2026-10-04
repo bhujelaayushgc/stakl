@@ -1403,6 +1403,74 @@
   color: var(--muted);
   margin-bottom: 14px;
 }
+.peer-access-state strong {
+  color: var(--text);
+}
+.peer-access-warning {
+  padding-left: 12px;
+  border-left: 2px solid var(--yellow);
+}
+.peer-certificate-replacement {
+  margin: 12px 0;
+  max-width: 72ch;
+}
+.peer-certificate-replacement .host-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.peer-connection-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin: 16px 0;
+  max-width: 760px;
+}
+.peer-connection-details label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.peer-connection-details input,
+.peer-connection-details textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.peer-connection-details textarea {
+  resize: vertical;
+  overflow-wrap: anywhere;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+.peer-connection-details > button {
+  margin-top: 24px;
+}
+.peer-connection-details > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .peer-connection-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .peer-connection-details > button {
+    margin-top: 0;
+    justify-self: start;
+  }
+  .peer-connection-details input,
+  .peer-connection-details textarea {
+    font-size: 16px;
+  }
+}
 .host-row {
   display: flex;
   align-items: center;

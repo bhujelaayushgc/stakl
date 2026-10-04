@@ -5,9 +5,11 @@ import {
   elapsed,
   type HostDescription,
   type PeerGrant,
+  type PeerAccessStatus,
 } from "./types";
 import { hostStateLabel } from "./hosts";
 import { PageHeader } from "./ui";
+import { ConnectionDetails, PeerAccessSetup } from "./PeerAccessSetup";
 
 type Editor = {
   id?: string;
@@ -48,6 +50,8 @@ export function HostsPage({
   const [grantName, setGrantName] = useState("");
   const [access, setAccess] = useState<PeerGrant["access"]>("read");
   const [issuedToken, setIssuedToken] = useState("");
+  const [peerAccessStatus, setPeerAccessStatus] =
+    useState<PeerAccessStatus | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const issueButton = useRef<HTMLButtonElement>(null);
@@ -248,9 +252,10 @@ export function HostsPage({
           <h3>Connect another machine</h3>
           <ol>
             <li>
-              Run Stakl on the other machine with an HTTPS endpoint this
-              controller can reach. You can also use an SSH tunnel with loopback
-              HTTP.
+              Run Stakl on the other machine. In its Hosts page, use
+              <strong> Access from other machines</strong> to select a network
+              address and port, then enable access. Copy its endpoint and public
+              certificate. Manual HTTPS and SSH tunnels also work.
             </li>
             <li>
               On that machine, open <strong>Hosts</strong>, then{" "}
@@ -294,6 +299,7 @@ export function HostsPage({
           </a>
         </div>
       </details>
+      <PeerAccessSetup onStatus={setPeerAccessStatus} onNotice={onNotice} />
       {loadError && (
         <div className="hosts-error" role="alert">
           {loadError}{" "}
@@ -389,6 +395,7 @@ export function HostsPage({
           <label>
             Access
             <select
+              aria-label="Access"
               value={access}
               onChange={(e) => setAccess(e.target.value as PeerGrant["access"])}
             >
@@ -616,6 +623,9 @@ export function HostsPage({
               Add host, and use it to connect to this machine. It will not be
               shown again.
             </Dialog.Description>
+            {peerAccessStatus?.running && (
+              <ConnectionDetails status={peerAccessStatus} grant />
+            )}
             <label>
               One-time peer token
               <textarea

@@ -53,6 +53,27 @@ All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations a
 
 ## HTTPS and headless peers
 
+### Enable access from the dashboard
+
+Each machine runs its own Stakl controller and dashboard. To let another dashboard connect here:
+
+1. Start Stakl normally and open **Hosts > Access from other machines**.
+2. Select this machine's LAN or VPN IP address and a free peer port (49153 by default), then select **Enable access**. Stakl generates a self-signed certificate and opens a separate HTTPS endpoint for scoped peer connections. The local dashboard, CLI, and services keep running.
+3. Under **Local peer access**, issue a named **Read** or **Control** grant. Read includes service details, status, health, history, and logs. Control adds per-app start, stop, and restart. Copy the token immediately; it is shown once.
+4. On the connecting machine's dashboard, use **Hosts > Add host**. Enter a display name, the copied HTTPS endpoint, the grant token, and the public certificate in **Trusted CA PEM**. These details are available together in the grant dialog when the peer endpoint is running.
+
+The endpoint is this machine's reachable address and peer port, for example `https://192.168.1.20:49153`. The two machines must have network connectivity, and the selected port must be allowed by your firewall. Stakl does not change firewall or router settings. Use a LAN or VPN address; the setup excludes loopback, wildcard, multicast, and link-local addresses.
+
+This setup does not require editing YAML or creating an administration token. The additional endpoint serves only scoped peer operations, not the dashboard, configuration editor, or grant administration. Certificates are verified by the connecting Stakl controller; you do not need to install this certificate in your browser.
+
+Settings and generated certificate/private-key material are saved in mode-0600 `peer-access.json` beside `instance.json` and restored on controller startup. Keep this file private and back it up separately; `stakl backup` does not include it. Do not copy it to provision another host. Only the public certificate is shown in Hosts. The certificate lasts one year. If it expires or a new address is not covered by its SANs, disable the endpoint and explicitly select **Replace saved certificate** when enabling again, then update the saved certificate trust on connecting dashboards. Stakl never silently replaces an existing certificate.
+
+**Disable access** closes this peer endpoint and its active connections without stopping services or deleting grants. Re-enabling reuses a valid saved certificate. Disable before changing the address or port. If the endpoint cannot start after a restart, Hosts shows the error while the local dashboard remains available.
+
+If you separately configured network HTTPS on the primary listener, disabling this additional endpoint leaves that route of access available. Revoke a grant to withdraw its permissions on every listener. Connections are one-way; connecting both directions requires issuing a grant and adding a host on each machine.
+
+### Manually configure the primary HTTPS listener
+
 Create a certificate without starting a controller:
 
 ```sh
@@ -90,7 +111,7 @@ Keep `tls-key.pem` on the peer and back it up separately; `stakl backup` does no
 
 ### Connecting from a dashboard
 
-1. On the peer, start Stakl with native HTTPS as above, or keep its HTTP listener on loopback and establish the tunnel below.
+1. On the peer, enable access in **Hosts > Access from other machines** as above. Alternatively configure native HTTPS manually, or keep its HTTP listener on loopback and establish the tunnel below.
 2. In the peer dashboard's **Hosts > Local peer access**, issue a named grant. Read includes details, history, health, and logs. Control adds only per-app start, stop, and restart. Alternatively use the `peer tokens` CLI commands above with the peer's `--config` path.
 3. Copy the one-time token. In the hub dashboard, open **Hosts > Add host**. Enter a display name, the endpoint (for example `https://peer.example:49152`), the peer token, and the public certificate PEM if needed. Connection requires a successful identity handshake.
 4. Select the host or **All hosts** in Applications. Open a row to inspect that host's tabs. Remote configuration is redacted and read-only. A remote `localhost` link is labeled with its host instead of opening on your computer; remote ports are observations, not browser reachability checks.
