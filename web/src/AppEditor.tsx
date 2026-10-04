@@ -122,6 +122,9 @@ export function AppEditor({
       loadIndex.current++;
     };
   }, [load]);
+  useEffect(() => {
+    if (!loading) document.getElementById("app-field-name")?.focus();
+  }, [loading]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   useEffect(() => {

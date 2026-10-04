@@ -4,6 +4,22 @@
 
 Paths resolve relative to the configuration directory, except Compose env files, app env files, and PID files, which resolve relative to the app's working directory. `~/` expands the current home directory. Environment interpolation in YAML is intentionally not performed: literal values stay literal. `$VARIABLE` expansion belongs in an explicitly enabled shell command.
 
+## Add and edit apps in the dashboard
+
+On **Applications**, choose **Add app** to configure a local service through a form. Select Process for an executable with separate arguments, Shell for shell syntax, Docker Compose for a Compose file, or Custom for a service controlled by your own commands. Enter a display name, working directory, and start command or Compose file. The app ID is generated from the name; you can change it before adding the app.
+
+To discover projects instead, choose **Discover apps**, scan a directory, and select **Review & add**. The same form opens with the detected settings filled in. Review the command before saving; discovery identifies project files, not necessarily the correct entry point.
+
+The **Group** selector lets you choose an existing group, leave the app ungrouped, or **Create group...**. A new group and its app assignment are saved together. Canceling the editor saves neither.
+
+Expand the sections below the common settings for command arguments and shutdown, Compose options, environment variables/files, health and detection checks, dependencies, autostart/restart behavior, links, ports, tags, and notifications. Each argument has its own row, so an argument containing spaces stays one argument. Blank optional settings and **Default** choices use the configuration defaults. Durations accept Go syntax such as `500ms`, `5s`, and `1m`. Environment values are visible while editing and stored in the local configuration file.
+
+For an existing local app, open its details, select **Configuration**, and choose **Edit app**. Use the same form to change settings or move the app to another group. Existing IDs stay fixed to preserve dependencies, profiles, and history. Edit connected-host apps on their own controller.
+
+The **Form** and **YAML** buttons switch between controls and the YAML for this app. Invalid YAML must be corrected before returning to the form or saving. Apps using anchors, aliases, or merges are directed to the full **Configuration** editor so their source relationships stay intact.
+
+Saving validates the complete configuration, creates a backup, and reloads it. It does not start or restart a service. Updated command and environment settings take effect on the next start or restart; a running service keeps its current process settings. Navigation and Cancel ask before discarding an edited draft. If the file changed since the editor opened, saving retains your draft and offers **Reload configuration**; accepting reload discards the draft and loads the current file.
+
 ## Global configuration
 
 ```yaml

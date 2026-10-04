@@ -1372,11 +1372,13 @@ export function AppShell() {
               }}
             />
           )}
-          {page === "discover" && !appEditor && (
-            <DiscoverPage
-              onReview={(suggestion) => setAppEditor({ suggestion })}
-              onError={setError}
-            />
+          {page === "discover" && (
+            <div hidden={!!appEditor}>
+              <DiscoverPage
+                onReview={(suggestion) => setAppEditor({ suggestion })}
+                onError={setError}
+              />
+            </div>
           )}
           {page === "activity" && (
             <>
