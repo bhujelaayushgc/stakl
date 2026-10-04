@@ -1,0 +1,186 @@
+.app-editor {
+  max-width: 980px;
+  margin: 0 auto;
+}
+.app-editor .page-header {
+  margin-bottom: 20px;
+}
+.app-editor-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.app-editor-toolbar .active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.app-form {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.app-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 22px;
+}
+.app-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+  min-width: 0;
+}
+.app-field label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.app-field input,
+.app-field select,
+.app-field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+}
+.app-field textarea {
+  resize: vertical;
+  min-height: 70px;
+}
+.app-field input[readonly] {
+  color: var(--muted);
+  background: var(--surface-subtle);
+}
+.app-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.app-field .field-error,
+.app-form .field-error {
+  color: var(--red);
+}
+.app-field [aria-invalid="true"] {
+  border-color: var(--red);
+}
+.app-field input:focus-visible,
+.app-field select:focus-visible,
+.app-field textarea:focus-visible,
+.app-form-section summary:focus-visible,
+.app-yaml:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.app-new-group {
+  padding-left: 14px;
+  border-left: 2px solid var(--accent);
+  margin: 0 0 8px;
+}
+.app-form-section {
+  border-top: 1px solid var(--line);
+  padding: 0;
+}
+.app-form-section summary {
+  cursor: pointer;
+  padding: 16px 0;
+  font-weight: 500;
+  font-size: 14px;
+}
+.app-form-section[open] {
+  padding-bottom: 12px;
+}
+.app-form-section h3,
+.app-rows h3 {
+  margin: 6px 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.app-rows {
+  margin-bottom: 20px;
+}
+.app-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+.app-list-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+.app-map-row > button,
+.app-list-row > button {
+  margin-top: 25px;
+}
+.app-map-row .app-field,
+.app-list-row .app-field {
+  margin-bottom: 12px;
+}
+.app-command {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.app-editor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+}
+.app-editor-footer p {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 58ch;
+  margin: 0;
+}
+.app-yaml {
+  display: block;
+  width: 100%;
+  min-height: 360px;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font:
+    12px/1.6 "IBM Plex Mono",
+    monospace;
+  resize: vertical;
+}
+@media (max-width: 600px) {
+  .app-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-map-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .app-map-row > button {
+    margin-top: 0;
+    justify-self: start;
+    margin-bottom: 12px;
+  }
+  .app-editor-footer {
+    align-items: stretch;
+  }
+  .app-editor-footer .inline-actions {
+    width: 100%;
+  }
+}

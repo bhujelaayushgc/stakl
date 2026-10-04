@@ -13,6 +13,8 @@ export type AppDraft = {
   values: Record<string, unknown>;
   newGroup?: { id: string; name: string; order: number };
   appYAML?: string;
+  rowDrafts?: Record<string, [string, string][]>;
+  rowErrors?: Record<string, string>;
 };
 export class UnsafeAppSourceError extends Error {}
 const types = new Set(["process", "shell", "docker-compose", "custom"]);
@@ -193,6 +195,8 @@ export function buildAppConfiguration(
   draft: AppDraft,
   creating: boolean,
 ): string {
+  if (draft.rowErrors && Object.keys(draft.rowErrors).length)
+    throw Error(Object.values(draft.rowErrors).join(". "));
   if (!validConfigID(draft.id))
     throw Error("App ID must use letters, digits, underscores, or hyphens");
   if (!creating && draft.id !== original.id)
