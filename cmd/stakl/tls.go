@@ -2,23 +2,17 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/bhujelaayushgc/stakl/internal/api"
+	"github.com/bhujelaayushgc/stakl/internal/tlsutil"
 )
 
 func runTLS(dir string, args []string) error {
@@ -26,28 +20,7 @@ func runTLS(dir string, args []string) error {
 		return fmt.Errorf("usage: stakl tls init --host HOST (DNS name or IP address)")
 	}
 	host := args[2]
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return err
-	}
-	now := time.Now()
-	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: host}, NotBefore: now.Add(-5 * time.Minute), NotAfter: now.AddDate(1, 0, 0),
-		DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
-		BasicConstraintsValid: true, IsCA: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	if ip := net.ParseIP(host); ip != nil {
-		cert.IPAddresses = append(cert.IPAddresses, ip)
-	} else if host != "localhost" {
-		cert.DNSNames = append(cert.DNSNames, host)
-	}
-	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
-	if err != nil {
-		return err
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	certPEM, keyPEM, err := tlsutil.Generate([]string{host})
 	if err != nil {
 		return err
 	}
@@ -77,13 +50,13 @@ func runTLS(dir string, args []string) error {
 			os.Remove(certFile)
 		}
 	}()
-	if err := pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}); err != nil {
+	if _, err := keyOut.Write(keyPEM); err != nil {
 		return err
 	}
 	if err := keyOut.Close(); err != nil {
 		return err
 	}
-	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+	if _, err := certOut.Write(certPEM); err != nil {
 		return err
 	}
 	if err := certOut.Close(); err != nil {

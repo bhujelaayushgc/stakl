@@ -14,6 +14,7 @@ import (
 	"github.com/bhujelaayushgc/stakl/internal/config"
 	"github.com/bhujelaayushgc/stakl/internal/hosts"
 	"github.com/bhujelaayushgc/stakl/internal/manager"
+	"github.com/bhujelaayushgc/stakl/internal/peeraccess"
 	"github.com/bhujelaayushgc/stakl/internal/storage"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"github.com/bhujelaayushgc/stakl/web"
@@ -240,6 +241,8 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	s := &api.Server{Manager: m, Hosts: hostRegistry, ControllerID: controllerID, Token: token, Address: clientAddress, BindHost: c.Server.Host, Certificate: certificate, Version: version, Started: time.Now(), Assets: web.Assets()}
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
+	s.PeerAccess = peeraccess.New(filepath.Join(dir, "peer-access.json"), s.PeerHandler)
+	defer s.PeerAccess.Close()
 	hostRegistry.Start(serverCtx)
 	server := &http.Server{
 		Handler:           s.Handler(),
@@ -250,6 +253,7 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 		MaxHeaderBytes:    1 << 20,
 		BaseContext:       func(net.Listener) context.Context { return serverCtx },
 	}
+	s.PeerAccess.Restore(serverCtx)
 	serverErr := make(chan error, 1)
 	go func() {
 		if tlsConfig != nil {
@@ -277,6 +281,7 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	}
 	signal.Stop(sig)
 	watchCancel()
+	s.PeerAccess.Close()
 	serverCancel()
 	s.CancelPeerStreams()
 	hostRegistry.Close()

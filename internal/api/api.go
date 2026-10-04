@@ -10,6 +10,7 @@ import (
 	"github.com/bhujelaayushgc/stakl/internal/config"
 	"github.com/bhujelaayushgc/stakl/internal/hosts"
 	"github.com/bhujelaayushgc/stakl/internal/manager"
+	"github.com/bhujelaayushgc/stakl/internal/peeraccess"
 	"github.com/bhujelaayushgc/stakl/internal/runner"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"io"
@@ -31,6 +32,7 @@ import (
 type Server struct {
 	Manager                 *manager.Manager
 	Hosts                   *hosts.Registry
+	PeerAccess              *peeraccess.Controller
 	Token, Address, Version string
 	Started                 time.Time
 	Assets                  fs.FS
@@ -54,7 +56,7 @@ func errorJSON(w http.ResponseWriter, e error, status int) {
 	w.WriteHeader(status)
 	JSON(w, map[string]string{"error": e.Error()})
 }
-func (s *Server) Handler() http.Handler {
+func (s *Server) initController() {
 	s.controllerOnce.Do(func() {
 		if s.ControllerID == "" && s.Manager != nil && s.Manager.Store != nil {
 			s.ControllerID, s.controllerErr = s.Manager.Store.ControllerID()
@@ -63,9 +65,13 @@ func (s *Server) Handler() http.Handler {
 			s.controllerErr = fmt.Errorf("controller identity unavailable")
 		}
 	})
+}
+func (s *Server) Handler() http.Handler {
+	s.initController()
 	mux := http.NewServeMux()
 	s.peerRoutes(mux)
 	s.hostRoutes(mux)
+	s.peerAccessRoutes(mux)
 	mux.HandleFunc("GET /api/apps", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Views()) })
 	mux.HandleFunc("GET /api/apps/{id}", s.app)
 	mux.HandleFunc("POST /api/apps/{id}/{action}", s.action)

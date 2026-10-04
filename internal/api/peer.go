@@ -17,7 +17,7 @@ import (
 type peerGrantKey struct{}
 type peerStream struct{ cancel context.CancelFunc }
 
-func (s *Server) peerRoutes(mux *http.ServeMux) {
+func (s *Server) peerDataRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/peer/v1/info", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.peerInfo(r)) })
 	mux.HandleFunc("GET /api/peer/v1/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		JSON(w, hosts.Snapshot{Info: s.peerInfo(r), Groups: s.Manager.Config().Groups, Apps: s.Manager.Views()})
@@ -50,6 +50,10 @@ func (s *Server) peerRoutes(mux *http.ServeMux) {
 			JSON(w, hosts.LifecycleResponse{Info: s.peerInfo(r), Results: s.Manager.Operate(r.Context(), action, []string{r.PathValue("id")}, false)})
 		})
 	}
+}
+
+func (s *Server) peerRoutes(mux *http.ServeMux) {
+	s.peerDataRoutes(mux)
 	mux.HandleFunc("GET /api/peer-tokens", func(w http.ResponseWriter, r *http.Request) {
 		grants, err := s.Manager.Store.PeerGrants()
 		if err != nil {
