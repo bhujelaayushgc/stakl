@@ -162,6 +162,17 @@ it("loads actual source and saves only edits with the opening revision", async (
     "/api/config/save",
   ]);
 });
+it("allows name-only edits with the backend-supported default working directory", async () => {
+  const server = setup({
+    source:
+      "version: 1\napps: {worker: {name: Worker, type: process, start: {command: sleep}}}\n",
+  });
+  await screen.findByLabelText("Display name", { exact: true });
+  change("Display name", "Renamed default directory app");
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("Saved worker");
+  expect(Object.hasOwn(YAML.parse(server.raw).apps.worker, "cwd")).toBe(false);
+});
 
 it("prefills a discovered app and creates it with a group in one save", async () => {
   const server = setup({
@@ -216,6 +227,43 @@ it("syncs form and YAML edits including comments and pending groups", async () =
     cwd: "/var/tmp",
     group: "lab",
   });
+});
+
+it("preserves string scalar spellings when switching between form and YAML", async () => {
+  const server = setup({
+    source: raw.replace(
+      "env: {TOKEN: actual-value}",
+      "env: {TOKEN: 001234, FLAG: TRUE}",
+    ),
+  });
+  await screen.findByLabelText("Display name", { exact: true });
+  const expectValues = () => {
+    expect(
+      screen.getByLabelText("Environment variable value 1", { exact: true }),
+    ).toHaveValue("001234");
+    expect(
+      screen.getByLabelText("Environment variable value 2", { exact: true }),
+    ).toHaveValue("TRUE");
+  };
+  expectValues();
+  fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+  const yaml = (
+    screen.getByLabelText("Application YAML", {
+      exact: true,
+    }) as HTMLTextAreaElement
+  ).value;
+  expect(yaml).toContain("TOKEN: 001234");
+  expect(yaml).toContain("FLAG: TRUE");
+  fireEvent.click(screen.getByRole("button", { name: "Form" }));
+  expectValues();
+  fireEvent.click(screen.getByRole("button", { name: "YAML" }));
+  change("Application YAML", yaml.replace("name: Worker", "name: YAML worker"));
+  fireEvent.click(screen.getByRole("button", { name: "Form" }));
+  expectValues();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText("Saved worker");
+  expect(server.raw).toContain("TOKEN: 001234");
+  expect(server.raw).toContain("FLAG: TRUE");
 });
 
 it("retains invalid YAML and blocks changing an existing ID", async () => {
@@ -321,7 +369,7 @@ it("reports missing creation fields without submitting", async () => {
   await screen.findByLabelText("Display name", { exact: true });
   fireEvent.click(screen.getByRole("button", { name: "Add app" }));
   expect(
-    screen.getByLabelText("Working directory", { exact: true }),
+    screen.getByLabelText("Start command", { exact: true }),
   ).toHaveAttribute("aria-invalid", "true");
   expect(server.writes).toHaveLength(0);
 });

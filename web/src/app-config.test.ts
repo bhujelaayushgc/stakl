@@ -29,6 +29,68 @@ apps:
 `;
 
 describe("source-preserving app configuration", () => {
+  it("preserves scalar spellings in unrelated apps during a changed save", () => {
+    const source =
+      "version: 1\napps:\n  worker: {name: Worker, type: process, start: {command: sleep}}\n  other: {type: process, start: {command: sleep}, env: {TOKEN: 001234, FLAG: TRUE}}\n";
+    const original = loadAppDraft(source, "worker");
+    const draft = structuredClone(original);
+    draft.values.name = "Renamed";
+    const output = buildAppConfiguration(source, original, draft, false);
+    expect(output).toContain("TOKEN: 001234");
+    expect(output).toContain("FLAG: TRUE");
+  });
+  it("preserves backend string values and source spelling when a sibling map row changes", () => {
+    const source =
+      "version: 1\napps: {worker: {type: process, cwd: /tmp, start: {command: sleep, args: [001234]}, env: {TOKEN: 001234, FLAG: true, KEEP: old}}}\n";
+    const original = loadAppDraft(source, "worker");
+    expect(original.values.env).toEqual({
+      TOKEN: "001234",
+      FLAG: "true",
+      KEEP: "old",
+    });
+    expect(original.values.start).toEqual({
+      command: "sleep",
+      args: ["001234"],
+    });
+    const draft = structuredClone(original);
+    (draft.values.env as Record<string, string>).KEEP = "next";
+    const output = buildAppConfiguration(source, original, draft, false);
+    expect(output).toContain("TOKEN: 001234");
+    expect(output).toContain("FLAG: true");
+    expect(YAML.parse(output).apps.worker.env.KEEP).toBe("next");
+  });
+  it("renames a retained creation YAML key without discarding its comments", () => {
+    const original = createAppDraft(raw);
+    const draft = {
+      id: "chosen-id",
+      values: {
+        name: "New worker",
+        type: "process",
+        cwd: "/tmp",
+        start: { command: "sleep" },
+      },
+      appYAML:
+        "old-id: # preserved ID comment\n  name: New worker # preserved name comment\n  type: process\n  cwd: /tmp\n  start: {command: sleep}\n",
+    };
+    const output = buildAppConfiguration(raw, original, draft, true);
+    expect(output).toContain("# preserved ID comment");
+    expect(output).toContain("# preserved name comment");
+    expect(YAML.parse(output).apps["chosen-id"].name).toBe("New worker");
+    expect(YAML.parse(output).apps["old-id"]).toBeUndefined();
+  });
+  it("deletes prototype-named map keys without materializing inherited values", () => {
+    const source =
+      "version: 1\napps: {worker: {type: process, cwd: /tmp, start: {command: sleep}, env: {KEEP: yes, __proto__: literal, constructor: tool, toString: text}}}\n";
+    const original = loadAppDraft(source, "worker");
+    const draft = structuredClone(original);
+    draft.values.env = { KEEP: "yes" };
+    const config = YAML.parse(
+      buildAppConfiguration(source, original, draft, false),
+    );
+    expect(config.apps.worker.env).toEqual({ KEEP: "yes" });
+    for (const key of ["__proto__", "constructor", "toString"])
+      expect(Object.hasOwn(config.apps.worker.env, key)).toBe(false);
+  });
   it("leaves a no-op edit byte-for-byte unchanged", () => {
     const original = loadAppDraft(raw, "worker");
     expect(buildAppConfiguration(raw, original, original, false)).toBe(raw);

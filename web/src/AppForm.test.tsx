@@ -135,6 +135,16 @@ it("retains type-specific settings when a type change is canceled", () => {
     screen.queryByLabelText("Status command", { exact: true }),
   ).not.toBeInTheDocument();
 });
+it("applies a confirmed type change to the latest compatible field values", () => {
+  setup(true, "custom");
+  change("Status command", "status-tool");
+  change("App type", "process");
+  change("Description", "Edited while choosing a type");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change type and remove settings" }),
+  );
+  expect(saved().apps.app.description).toBe("Edited while choosing a type");
+});
 
 it("stores arguments with spaces as single values", () => {
   setup();

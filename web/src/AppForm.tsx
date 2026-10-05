@@ -351,9 +351,10 @@ export function AppForm({
       draft.newGroup.id !==
         availableID(draft.newGroup.name, Object.keys(groups), "group"),
   );
-  const [pendingType, setPendingType] = useState<ReturnType<
-    typeof changeAppType
-  > | null>(null);
+  const [pendingType, setPendingType] = useState<AppType | null>(null);
+  const pendingTransition = pendingType
+    ? changeAppType(draft, pendingType)
+    : null;
   const type = String(draft.values.type || "process");
   const read = (path: string) => valueAt(draft.values, path);
   const set = (path: string, value: unknown) =>
@@ -629,8 +630,12 @@ export function AppForm({
             value={type}
             onChange={(e) => {
               const result = changeAppType(draft, e.target.value as AppType);
-              if (result.removedPaths.length) setPendingType(result);
-              else onChange(result.draft);
+              if (result.removedPaths.length)
+                setPendingType(e.target.value as AppType);
+              else {
+                setPendingType(null);
+                onChange(result.draft);
+              }
             }}
           >
             <option value="process">Process</option>
@@ -642,15 +647,15 @@ export function AppForm({
         {text(
           "cwd",
           "Working directory",
-          "An existing directory on this host. Relative paths use the configuration directory.",
+          "An existing directory on this host. Leave blank to use the configuration directory.",
         )}
       </div>
-      {pendingType && (
+      {pendingTransition && (
         <div className="alert warning" role="alert">
           <p>
             Changing type removes these settings:{" "}
-            {pendingType.removedPaths.join(", ")}. Compatible settings will
-            stay.
+            {pendingTransition.removedPaths.join(", ")}. Compatible settings
+            will stay.
           </p>
           <div className="inline-actions">
             <button
@@ -664,7 +669,7 @@ export function AppForm({
               type="button"
               className="button"
               onClick={() => {
-                onChange(pendingType.draft);
+                onChange(pendingTransition.draft);
                 setPendingType(null);
               }}
             >

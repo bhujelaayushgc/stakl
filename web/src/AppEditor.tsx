@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import YAML, { isMap } from "yaml";
+import YAML from "yaml";
 import { AppForm } from "./AppForm";
 import {
   buildAppConfiguration,
   createAppDraft,
+  formatAppYAML,
   loadAppDraft,
+  parseAppYAML,
   UnsafeAppSourceError,
   validConfigID,
   type AppDraft,
@@ -36,8 +38,6 @@ function fieldErrors(
     errors.id = "This app ID already exists. Choose another ID.";
   if (creating && !String(draft.values.name || "").trim())
     errors.name = "Enter a display name.";
-  if (!String(draft.values.cwd || "").trim())
-    errors.cwd = "Enter the working directory on this host.";
   if (
     (draft.values.type || "process") !== "docker-compose" &&
     !String((draft.values.start as { command?: string })?.command || "").trim()
@@ -158,19 +158,9 @@ export function AppEditor({
   };
   const readYAML = (): AppDraft => {
     if (!draft) throw Error("App configuration is not loaded.");
-    const fragment = YAML.parseDocument(yaml);
-    if (fragment.errors.length)
-      throw Error(`Invalid YAML: ${fragment.errors[0].message}`);
-    if (!isMap(fragment.contents) || fragment.contents.items.length !== 1)
-      throw Error(
-        "Application YAML must contain exactly one app ID and its settings.",
-      );
-    const id = String(fragment.contents.items[0].key);
-    if (appID && id !== appID)
+    const next = parseAppYAML(yaml);
+    if (appID && next.id !== appID)
       throw Error("An existing app ID cannot be changed.");
-    const full = new YAML.Document();
-    full.set("apps", fragment.contents);
-    const next = loadAppDraft(String(full), id);
     if (draft.newGroup && next.values.group === draft.newGroup.id)
       next.newGroup = draft.newGroup;
     if (yaml !== yamlBaseline || draft.appYAML) next.appYAML = yaml;
@@ -180,12 +170,10 @@ export function AppEditor({
     if (nextMode === mode || !draft || !source || !original) return;
     try {
       if (nextMode === "yaml") {
-        const full = YAML.parseDocument(
+        const text = formatAppYAML(
           buildAppConfiguration(source.raw || "", original, draft, creating),
+          draft.id,
         );
-        const fragment = new YAML.Document();
-        fragment.set(draft.id, full.getIn(["apps", draft.id], true));
-        const text = String(fragment);
         setYAML(text);
         setYAMLBaseline(text);
       } else setDraft(readYAML());

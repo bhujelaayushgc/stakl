@@ -1,4 +1,4 @@
-import YAML, { isAlias, isMap, isNode, visit } from "yaml";
+import YAML, { isAlias, isMap, isNode, isScalar, isSeq, visit } from "yaml";
 
 export type AppType = "process" | "shell" | "docker-compose" | "custom";
 export type DiscoverySuggestion = {
@@ -21,11 +21,158 @@ const types = new Set(["process", "shell", "docker-compose", "custom"]);
 export const validConfigID = (id: string) => /^[A-Za-z0-9_-]+$/.test(id);
 const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
+const own = (values: Record<string, unknown>, key: string) =>
+  Object.hasOwn(values, key) ? values[key] : undefined;
+
+// Go's YAML decoder uses the scalar spelling for string fields, including
+// unquoted numbers. JS's resolved numeric value can lose zeros or precision.
+function scalarString(node: unknown): string {
+  if (!isScalar(node) || node.value == null) return "";
+  if (typeof node.value === "string") return node.value;
+  return "source" in node && typeof node.source === "string"
+    ? node.source
+    : String(node.value);
+}
+
+function sourcePath(doc: ReturnType<typeof document>, path: string[]) {
+  let node: unknown = doc.contents;
+  return path.map((part) => {
+    const pair = isMap(node)
+      ? node.items.find((p) => scalarString(p.key) === part)
+      : undefined;
+    const key = pair && isScalar(pair.key) ? pair.key.value : part;
+    node = isMap(node) || isSeq(node) ? node.get(key, true) : undefined;
+    return key;
+  });
+}
+
+function sourceStrings(values: Record<string, unknown>, source: unknown) {
+  if (!isMap(source)) return;
+  const put = (path: string, value: unknown) => {
+    const keys = path.split(".");
+    let target = values;
+    for (const key of keys.slice(0, -1)) {
+      if (!record(own(target, key))) return;
+      target = own(target, key) as Record<string, unknown>;
+    }
+    Object.defineProperty(target, keys[keys.length - 1], {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  };
+  const paths = [
+    "name",
+    "description",
+    "group",
+    "type",
+    "cwd",
+    "icon",
+    "notes",
+    "start.command",
+    "stop.command",
+    "stop.signal",
+    "stop.timeout",
+    "status.command",
+    "logs.command",
+    "restart_command.command",
+    "docker.compose_file",
+    "docker.project_name",
+    "docker.stop_mode",
+    "autostart.delay",
+    "restart.policy",
+    "restart.delay",
+    "restart.backoff",
+  ];
+  for (const check of ["health", "detect"])
+    for (const key of [
+      "type",
+      "url",
+      "host",
+      "name",
+      "path",
+      "command",
+      "interval",
+      "timeout",
+      "initial_delay",
+    ])
+      paths.push(`${check}.${key}`);
+  for (const path of paths) {
+    const node = source.getIn(path.split("."), true);
+    if (isScalar(node)) put(path, scalarString(node));
+  }
+  for (const path of [
+    "start.args",
+    "status.args",
+    "logs.args",
+    "restart_command.args",
+    "docker.profiles",
+    "docker.env_files",
+    "docker.args",
+    "env_file",
+    "tags",
+  ]) {
+    const node = source.getIn(path.split("."), true);
+    if (isSeq(node) && node.items.every(isScalar))
+      put(path, node.items.map(scalarString));
+  }
+  for (const path of ["env", "links"]) {
+    const node = source.get(path, true);
+    if (isMap(node))
+      put(
+        path,
+        Object.fromEntries(
+          node.items.map((pair) => {
+            if (!isScalar(pair.key) || !isScalar(pair.value))
+              throw new UnsafeAppSourceError(
+                `${path} needs the full YAML configuration editor.`,
+              );
+            return [scalarString(pair.key), scalarString(pair.value)];
+          }),
+        ),
+      );
+  }
+  const ports = source.get("ports", true);
+  const portValues = values.ports;
+  if (isSeq(ports) && Array.isArray(portValues))
+    ports.items.forEach((port, index) => {
+      if (isMap(port) && isScalar(port.get("name", true)))
+        portValues[index].name = scalarString(port.get("name", true));
+    });
+}
 
 function document(raw: string) {
   const doc = YAML.parseDocument(raw);
   if (doc.errors.length) throw Error(`Invalid YAML: ${doc.errors[0].message}`);
   if (!isMap(doc.contents)) throw Error("Configuration must be a YAML mapping");
+  // Preserve unchanged scalar spellings across the whole document. Otherwise
+  // JS serialization rewrites 001234/TRUE to 1234/true, changing Go string fields.
+  doc.schema.tags = doc.schema.tags.map((tag) => {
+    if (
+      tag.collection ||
+      !tag.stringify ||
+      ![
+        "tag:yaml.org,2002:int",
+        "tag:yaml.org,2002:float",
+        "tag:yaml.org,2002:bool",
+      ].includes(tag.tag)
+    )
+      return tag;
+    const stringify = tag.stringify;
+    return {
+      ...tag,
+      stringify: (item, ctx, onComment, onChompKeep) => {
+        if (
+          "source" in item &&
+          typeof item.source === "string" &&
+          Object.is(YAML.parse(item.source), item.value)
+        )
+          return item.source;
+        return stringify(item, ctx, onComment, onChompKeep);
+      },
+    };
+  });
   return doc;
 }
 
@@ -58,12 +205,16 @@ function appMap(doc: ReturnType<typeof document>) {
   return apps;
 }
 
-function normalized(values: unknown): Record<string, unknown> {
+function normalized(
+  values: unknown,
+  source?: unknown,
+): Record<string, unknown> {
   if (!record(values) || !types.has(String(values.type || "process")))
     throw new UnsafeAppSourceError(
       "This app cannot be represented by the form. Use the full YAML configuration editor.",
     );
   const result = structuredClone(values);
+  sourceStrings(result, source);
   if (typeof result.autostart === "boolean")
     result.autostart = { enabled: result.autostart };
   if (Array.isArray(result.depends_on)) {
@@ -129,7 +280,7 @@ export function createAppDraft(
   const apps = appMap(doc);
   const id = availableID(
     suggestion?.name || "app",
-    apps?.items.map((p) => String(p.key)) || [],
+    apps?.items.map((p) => scalarString(p.key)) || [],
   );
   const values: Record<string, unknown> = {
     name: suggestion?.name || "",
@@ -148,16 +299,39 @@ export function createAppDraft(
 export function loadAppDraft(raw: string, id: string): AppDraft {
   const doc = document(raw);
   appMap(doc);
-  const node = doc.getIn(["apps", id], true);
+  const node = doc.getIn(sourcePath(doc, ["apps", id]), true);
   if (!node) throw Error(`App ${id} no longer exists`);
   safe(node);
-  return { id, values: normalized(doc.toJS().apps[id]) };
+  return { id, values: normalized(isMap(node) ? node.toJSON() : null, node) };
+}
+
+export function formatAppYAML(raw: string, id: string): string {
+  const doc = document(raw);
+  appMap(doc);
+  const node = doc.getIn(sourcePath(doc, ["apps", id]), true);
+  safe(node);
+  doc.contents = null;
+  doc.set(id, node);
+  return String(doc);
+}
+
+export function parseAppYAML(raw: string): AppDraft {
+  const doc = document(raw);
+  if (!isMap(doc.contents) || doc.contents.items.length !== 1)
+    throw Error(
+      "Application YAML must contain exactly one app ID and its settings.",
+    );
+  const pair = doc.contents.items[0];
+  const id = scalarString(pair.key);
+  const node = pair.value;
+  safe(node);
+  return { id, values: normalized(isMap(node) ? node.toJSON() : null, node) };
 }
 
 function equal(a: unknown, b: unknown): boolean {
   if (record(a) && record(b)) {
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-    return [...keys].every((key) => equal(a[key], b[key]));
+    return [...keys].every((key) => equal(own(a, key), own(b, key)));
   }
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -169,24 +343,25 @@ function patch(
   after: unknown,
 ) {
   if (equal(before, after)) return;
+  const targetPath = sourcePath(doc, path);
   if (after === undefined) {
-    doc.deleteIn(path);
+    doc.deleteIn(targetPath);
     return;
   }
   if (record(before) && record(after)) {
     // Convert a shorthand node only if one of its normalized values changed.
-    if (!isMap(doc.getIn(path, true))) {
-      const old = doc.getIn(path, true);
+    if (!isMap(doc.getIn(targetPath, true))) {
+      const old = doc.getIn(targetPath, true);
       const node = doc.createNode(before);
       if (isNode(old)) {
         node.comment = old.comment;
         node.commentBefore = old.commentBefore;
       }
-      doc.setIn(path, node);
+      doc.setIn(targetPath, node);
     }
     for (const key of new Set([...Object.keys(before), ...Object.keys(after)]))
-      patch(doc, [...path, key], before[key], after[key]);
-  } else doc.setIn(path, after);
+      patch(doc, [...path, key], own(before, key), own(after, key));
+  } else doc.setIn(targetPath, after);
 }
 
 export function buildAppConfiguration(
@@ -210,7 +385,7 @@ export function buildAppConfiguration(
     return raw;
   const doc = document(raw);
   appMap(doc);
-  if (creating && doc.hasIn(["apps", draft.id]))
+  if (creating && doc.hasIn(sourcePath(doc, ["apps", draft.id])))
     throw Error(`App ${draft.id} already exists`);
   if (!creating) loadAppDraft(raw, draft.id);
   if (draft.newGroup) {
@@ -222,7 +397,7 @@ export function buildAppConfiguration(
       throw new UnsafeAppSourceError(
         "Groups need the full YAML configuration editor.",
       );
-    if (doc.hasIn(["groups", draft.newGroup.id]))
+    if (doc.hasIn(sourcePath(doc, ["groups", draft.newGroup.id])))
       throw Error(`Group ${draft.newGroup.id} already exists`);
     doc.setIn(["groups", draft.newGroup.id], {
       name: draft.newGroup.name,
@@ -231,16 +406,16 @@ export function buildAppConfiguration(
   }
   if (draft.appYAML) {
     const fragment = document(draft.appYAML);
-    if (
-      !isMap(fragment.contents) ||
-      fragment.contents.items.length !== 1 ||
-      !fragment.has(draft.id)
-    )
+    if (!isMap(fragment.contents) || fragment.contents.items.length !== 1)
       throw Error("App YAML must contain exactly this app ID");
-    const node = fragment.get(draft.id, true);
+    const pair = fragment.contents.items[0];
+    if (creating && isScalar(pair.key)) pair.key.value = draft.id;
+    else if (scalarString(pair.key) !== draft.id)
+      throw Error("An existing app ID cannot be changed");
+    const node = pair.value;
     safe(node);
-    const yamlValues = normalized(fragment.toJS()[draft.id]);
-    doc.setIn(["apps", draft.id], node);
+    const yamlValues = normalized(isMap(node) ? node.toJSON() : null, node);
+    doc.setIn(sourcePath(doc, ["apps", draft.id]), node);
     patch(doc, ["apps", draft.id], yamlValues, draft.values);
   } else if (creating) doc.setIn(["apps", draft.id], draft.values);
   else patch(doc, ["apps", draft.id], original.values, draft.values);
