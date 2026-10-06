@@ -232,10 +232,14 @@ test("destination URLs restore navigation, filters, and detail tabs", async ({
     .getByRole("navigation")
     .getByRole("link", { name: "Ports" })
     .click();
-  await expect(page.getByRole("heading", { name: "Ports" })).toBeFocused();
+  await expect(
+    page.getByRole("heading", { name: "Ports", exact: true }),
+  ).toBeFocused();
   expect(new URL(page.url()).searchParams.get("view")).toBe("ports");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Ports" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ports", exact: true }),
+  ).toBeVisible();
   await page.goBack();
   await expect(
     page.getByRole("heading", { name: "Applications", exact: true }),
