@@ -134,6 +134,7 @@ The dashboard uses a compact workstation layout with a neutral navigation rail, 
 - Shareable destination URLs preserve the current view, application filters, and detail tab; browser back/forward navigation restores them.
 - Optional YAML editor with highlighting, validation, conflict detection, backups, and reload. Raw YAML is concealed until explicitly revealed.
 - Discovery suggestions require review and never start automatically. Global Stop All requires confirmation.
+- Gradual adoption: **Observe** an existing TCP listener from Ports, or **Observe existing** on a discovered Compose project. Review its name, detection, checks, links, and group through forms. Observation-only entries keep lifecycle control and logs with their existing manager. See [the adoption guide](docs/configuration.md#gradual-adoption-of-existing-services).
 - Open a service's **More info** menu item (or click its name) for the project path and configured/detected ports. Running Compose services use Docker's published host ports automatically; no `ports` configuration is needed for detection. The Ports page lists local TCP listeners, UDP bindings and Docker-published ports, including processes outside Stakl, and refreshes every 15 seconds while open. Local socket inspection uses `lsof` (included on macOS; install it on Linux) and is limited to processes visible to your user. An absent listener is not a guarantee that a port is available.
 
 <details>

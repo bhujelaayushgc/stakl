@@ -154,9 +154,9 @@ Keep the state directory and its backups private. The mode-0600 database contain
 | `name` | Display name, defaults to ID; must be unique |
 | `description` | Short row description |
 | `group` | Optional existing group ID |
-| `type` | `process` (default), `shell`, `docker-compose`, `custom` |
+| `type` | `process` (default), `shell`, `docker-compose`, `custom`, `external` (observation only) |
 | `cwd` | Existing working directory; defaults to config directory |
-| `start` | Required command for non-Compose apps |
+| `start` | Required for process, shell, and custom apps; unavailable for observation-only apps |
 | `stop` | Signal, timeout, and optional custom command |
 | `restart_command` | Custom runner restart command; otherwise stop + start |
 | `status` | Custom runner command: exit 0 means running |
@@ -167,7 +167,7 @@ Keep the state directory and its backups private. The mode-0600 database contain
 | `depends_on` | List of IDs or map of ID to condition |
 | `autostart` | Boolean or `{enabled: true, delay: 5s}` |
 | `health` | Optional periodic health check |
-| `detect` | Optional external-availability check |
+| `detect` | External-availability check; required for observation-only apps |
 | `ports` | List of `{name, port}`; warns/refuses duplicate start if occupied |
 | `links` | Named absolute HTTP(S) URLs |
 | `restart` | Bounded restart policy |
@@ -176,6 +176,35 @@ Keep the state directory and its backups private. The mode-0600 database contain
 | `tags`, `icon`, `favorite`, `notes` | Optional metadata; type determines default UI icon |
 
 Browser favorites can override initial `favorite` values locally. `icon` accepts terminal, box, server, activity, layers, code, folder, or heart; unknown/omitted values use the runner type icon. New configuration takes effect for the next launch. Active workloads keep the launch-time cwd, environment, stop settings and runner identity, so a config edit cannot retarget a stop action.
+
+## Gradual adoption of existing services
+
+Use **Observation only** to bring an existing service into the dashboard while keeping its current process manager.
+
+1. Open **Ports** and select **Observe** beside an unassociated TCP listener. Stakl fills in a TCP detection target and port; wildcard addresses become a local loopback target.
+2. Review the name and detection address. Select a group or create one in the same form. Add health checks, links, notes, or dependencies as needed.
+3. Select **Add app**. Stakl periodically checks availability and displays **Running externally** when detected. Saving never launches or takes ownership of the service.
+
+For Compose projects, scan their directory through **Discover apps** and select **Observe existing**. Review the Compose file and set **Project name** to the existing name shown by `docker compose ls`. Discovery finds configuration files; it does not establish whether their containers are running. Stakl uses read-only `docker compose ps` inspection and can show containers and published ports. Docker inspection failures produce unknown state.
+
+You can also use **Add app**, choose **Observation only**, and configure detection manually. UDP listeners need an explicit process-name, PID-file, or command check; a TCP probe cannot verify a UDP service. Process checks require a name, including health checks for observation-only entries. Use non-mutating commands for checks.
+
+```yaml
+apps:
+  existing-api:
+    name: Existing API
+    type: external
+    group: development
+    detect: {type: tcp, host: 127.0.0.1, port: 8000}
+    health: {type: http, url: 'http://127.0.0.1:8000/health'}
+    links: {API: 'http://127.0.0.1:8000'}
+```
+
+Detection proves that the configured endpoint or check is available. It does not verify that a listener still belongs to the originally discovered process; a replacement service on the same port can satisfy the check. Discovered PIDs are never persisted as ownership credentials. If detection fails, the entry displays **Stopped**, meaning not detected by its check.
+
+Observation-only entries cannot configure launch/control commands, autostart, automatic restarts, or shutdown cleanup. Start, stop, restart, and force-kill requests are refused by the backend. Global and profile operations skip direct control of these entries; managed apps can still depend on their `running` or `healthy` condition. An unavailable observed dependency blocks its dependents without starting the external service. Logs remain with the existing service manager.
+
+Observation settings can be edited or removed while the external service keeps running. To move into managed operation, explicitly change the app type and configure its supported runner; arrange the handoff from the existing manager yourself. A Stakl-owned workload must be stopped before changing to observation-only mode. Connected dashboards can view observations through the existing host connection; discovery and configuration editing happen on the service's own host.
 
 ## Commands and environment
 

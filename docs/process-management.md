@@ -45,6 +45,8 @@ Keep the binary accessible at its launch path until started supervisors have boo
 
 Detection can use HTTP, TCP, an exact process-name pattern (`pgrep -x`), a PID file, or a command's zero exit code. Detection proves availability, not ownership. A detected process is shown as **Running externally**. Normal external processes cannot be stopped or force-killed; a custom runner's explicit stop command is the escape hatch.
 
+For services that should remain entirely under their existing manager, use `type: external` with a detection check. These observation-only entries refuse all lifecycle operations, including start and restart while not detected. Global and profile operations omit them from direct control; dependencies can still wait for their availability or health. Stakl does not capture their logs. See [gradual adoption](configuration.md#gradual-adoption-of-existing-services).
+
 States are stopped, starting, running, healthy, unhealthy, stopping, failed, external, and unknown. Health does not turn a live process into a stopped one. The UI keeps external ownership visible even when health fails; its separate health field/history captures that result.
 
 ## Restarts
