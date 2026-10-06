@@ -73,6 +73,7 @@ export interface ListeningPort {
   port: number;
   protocol: "TCP" | "UDP";
   address: string;
+  family?: "IPv4" | "IPv6";
   pid: number;
   pgid: number;
   process: string;

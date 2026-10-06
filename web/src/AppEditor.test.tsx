@@ -9,8 +9,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import YAML from "yaml";
 import { AppEditor } from "./AppEditor";
-import type { DiscoverySuggestion } from "./app-config";
-import type { ListeningPort } from "./types";
+import type { DiscoverySuggestion, ObservationSource } from "./app-config";
 
 const raw = `# preserved workspace
 version: 1
@@ -32,6 +31,8 @@ function setup({
   saveDelay,
   suggestion,
   observation,
+  metadata = { cwd: "", warning: "" },
+  metadataError = false,
 }: {
   editing?: boolean;
   source?: string;
@@ -39,7 +40,13 @@ function setup({
   validationError?: string;
   saveDelay?: Promise<void>;
   suggestion?: DiscoverySuggestion;
-  observation?: ListeningPort;
+  observation?: ObservationSource;
+  metadata?: {
+    cwd: string;
+    warning: string;
+    docker?: { compose_file: string; project_name: string };
+  };
+  metadataError?: boolean;
 } = {}) {
   const server = {
     raw: source,
@@ -49,6 +56,11 @@ function setup({
   };
   vi.stubGlobal("fetch", async (path: string, options: RequestInit) => {
     server.requests.push(path);
+    if (path === "/api/system/observe")
+      return Response.json(
+        metadataError ? { error: "inspection unavailable" } : metadata,
+        { status: metadataError ? 503 : 200 },
+      );
     if (path === "/api/config?raw=true")
       return Response.json({
         raw: server.raw,
@@ -108,6 +120,117 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+it("autofills a running Compose project without confusing its name with a new app ID", async () => {
+  const server = setup({
+    editing: false,
+    observation: {
+      name: "Worker",
+      type: "docker-compose",
+      path: "/projects/stack",
+      indicator: "compose.yml",
+      command: "",
+    },
+    metadata: {
+      cwd: "/projects/stack",
+      docker: {
+        compose_file: "/projects/stack/custom.yaml",
+        project_name: "actual-project",
+      },
+      warning: "",
+    },
+  });
+  expect(
+    await screen.findByLabelText("Working directory", { exact: true }),
+  ).toHaveValue("/projects/stack");
+  expect(screen.getByLabelText("Compose file", { exact: true })).toHaveValue(
+    "/projects/stack/custom.yaml",
+  );
+  expect(screen.getByLabelText("Project name", { exact: true })).toHaveValue(
+    "actual-project",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add app" }));
+  await screen.findByText("Saved worker-2");
+  expect(YAML.parse(server.raw).apps["worker-2"].docker.project_name).toBe(
+    "actual-project",
+  );
+});
+
+it("recognizes a Compose project behind a TCP listener and preserves its published port", async () => {
+  const server = setup({
+    editing: false,
+    observation: {
+      port: 3000,
+      protocol: "TCP",
+      address: "127.0.0.1",
+      pid: 42,
+      pgid: 40,
+      process: "docker",
+    },
+    metadata: {
+      cwd: "/projects/stack",
+      docker: {
+        compose_file: "/projects/stack/compose.yml",
+        project_name: "existing-stack",
+      },
+      warning: "",
+    },
+  });
+  expect(
+    await screen.findByLabelText("Project name", { exact: true }),
+  ).toHaveValue("existing-stack");
+  fireEvent.click(screen.getByRole("button", { name: "Add app" }));
+  await screen.findByText("Saved docker-3000");
+  expect(YAML.parse(server.raw).apps["docker-3000"]).toMatchObject({
+    type: "external",
+    detect: { type: "docker" },
+    ports: [{ name: "TCP", port: 3000 }],
+  });
+});
+
+it("autofills a process directory while keeping the TCP check", async () => {
+  setup({
+    editing: false,
+    observation: {
+      port: 3000,
+      protocol: "TCP",
+      address: "127.0.0.1",
+      pid: 42,
+      pgid: 40,
+      process: "node",
+    },
+    metadata: { cwd: "/projects/api", warning: "" },
+  });
+  expect(
+    await screen.findByLabelText("Working directory", { exact: true }),
+  ).toHaveValue("/projects/api");
+  expect(screen.getByLabelText("Detection port", { exact: true })).toHaveValue(
+    3000,
+  );
+});
+
+it("keeps manual observation available when metadata inspection fails", async () => {
+  setup({
+    editing: false,
+    observation: {
+      port: 3000,
+      protocol: "TCP",
+      address: "127.0.0.1",
+      pid: 42,
+      pgid: 40,
+      process: "node",
+    },
+    metadataError: true,
+  });
+  expect(
+    await screen.findByLabelText("Display name", { exact: true }),
+  ).toHaveValue("node 3000");
+  expect(
+    screen.getByText(
+      /Could not autofill service details: inspection unavailable/,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add app" })).toBeEnabled();
+});
 it("reviews a listener as observation-only and saves checks and a group without launch commands", async () => {
   const server = setup({
     editing: false,
@@ -148,9 +271,12 @@ it("reviews a listener as observation-only and saves checks and a group without 
   });
   for (const key of ["start", "stop", "autostart", "restart", "pid"])
     expect(app).not.toHaveProperty(key);
-  expect(server.requests.every((path) => path.startsWith("/api/config"))).toBe(
-    true,
-  );
+  expect(
+    server.requests.every(
+      (path) =>
+        path.startsWith("/api/config") || path === "/api/system/observe",
+    ),
+  ).toBe(true);
 });
 it("keeps a manually chosen creation ID after returning from YAML mode", async () => {
   const server = setup({ editing: false });

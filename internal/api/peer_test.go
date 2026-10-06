@@ -126,12 +126,12 @@ func TestPeerAccessMatrix(t *testing.T) {
 				t.Fatal("peer discarded lifecycle history")
 			}
 		}
-		for _, path := range []string{"/api/apps", "/api/config?raw=true", "/api/profiles", "/api/system/status", "/api/peer-tokens", "/api/hosts", "/api/history"} {
+		for _, path := range []string{"/api/apps", "/api/config?raw=true", "/api/profiles", "/api/system/status", "/api/system/directories", "/api/peer-tokens", "/api/hosts", "/api/history"} {
 			if w := peerRequest(h, "GET", path, token, "", ""); w.Code != 401 {
 				t.Fatalf("admin %s: %d", path, w.Code)
 			}
 		}
-		for _, path := range []string{"/api/discover", "/api/config/save", "/api/actions/start", "/api/profiles/test/start", "/api/peer-tokens", "/api/hosts"} {
+		for _, path := range []string{"/api/discover", "/api/system/observe", "/api/config/save", "/api/actions/start", "/api/profiles/test/start", "/api/peer-tokens", "/api/hosts"} {
 			if w := peerRequest(h, "POST", path, token, identity.ControllerID, `{}`); w.Code != 401 {
 				t.Fatalf("admin mutation %s: %d", path, w.Code)
 			}

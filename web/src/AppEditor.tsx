@@ -13,6 +13,7 @@ import {
   type AppDraft,
   type DiscoverySuggestion,
   type ObservationSource,
+  type ObservationMetadata,
 } from "./app-config";
 import { request, RequestError, type Config } from "./types";
 import { PageHeader } from "./ui";
@@ -80,6 +81,7 @@ export function AppEditor({
   const [original, setOriginal] = useState<AppDraft | null>(null);
   const [draft, setDraft] = useState<AppDraft | null>(null);
   const [loading, setLoading] = useState(true);
+  const [observationWarning, setObservationWarning] = useState("");
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"form" | "yaml">("form");
   const [yaml, setYAML] = useState("");
@@ -108,15 +110,30 @@ export function AppEditor({
     setErrors({});
     setUnsafe(false);
     setConflict(false);
+    setObservationWarning("");
     try {
       const current = await request<Config>("/config?raw=true");
+      let metadata: ObservationMetadata | undefined;
+      let warning = "";
+      if (observation) {
+        try {
+          metadata = await request<ObservationMetadata>(
+            "/system/observe",
+            observation,
+          );
+          warning = metadata.warning;
+        } catch (e) {
+          warning = `Could not autofill service details: ${(e as Error).message}. Review the settings manually.`;
+        }
+      }
       const initial = appID
         ? loadAppDraft(current.raw || "", appID)
         : observation
-          ? createObservationDraft(current.raw || "", observation)
+          ? createObservationDraft(current.raw || "", observation, metadata)
           : createAppDraft(current.raw || "", suggestion);
       if (index !== loadIndex.current) return;
       setSource(current);
+      setObservationWarning(warning);
       setOriginal(initial);
       setDraft(initial);
       setMode("form");
@@ -284,6 +301,11 @@ export function AppEditor({
         <p role="status">Loading app configuration...</p>
       ) : (
         <>
+          {observationWarning && (
+            <p className="alert warning" role="status">
+              {observationWarning}
+            </p>
+          )}
           {error && (
             <div
               className="alert error"

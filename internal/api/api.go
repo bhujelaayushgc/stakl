@@ -113,6 +113,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/system/status", s.system)
 	mux.HandleFunc("GET /api/system/ports", s.ports)
+	mux.HandleFunc("POST /api/system/observe", s.observe)
+	mux.HandleFunc("GET /api/system/directories", s.directories)
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Store.History("")) })
 	mux.HandleFunc("POST /api/discover", s.discover)
 	mux.HandleFunc("GET /api/system/docker", func(w http.ResponseWriter, r *http.Request) { JSON(w, runner.DockerAvailable()) })

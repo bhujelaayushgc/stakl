@@ -11,6 +11,11 @@ export type DiscoverySuggestion = {
   name: string;
 };
 export type ObservationSource = ListeningPort | DiscoverySuggestion;
+export type ObservationMetadata = {
+  cwd: string;
+  docker?: { compose_file: string; project_name: string };
+  warning: string;
+};
 export type AppDraft = {
   id: string;
   values: Record<string, unknown>;
@@ -317,6 +322,7 @@ export function loadAppDraft(raw: string, id: string): AppDraft {
 export function createObservationDraft(
   raw: string,
   source: ObservationSource,
+  metadata?: ObservationMetadata,
 ): AppDraft {
   const listener = "protocol" in source;
   if (listener && source.protocol !== "TCP")
@@ -348,6 +354,14 @@ export function createObservationDraft(
     draft.values.detect = { type: "tcp", host, port: source.port };
     draft.values.ports = [{ name: "TCP", port: source.port }];
   } else draft.values.detect = { type: "docker" };
+  if (metadata?.cwd) draft.values.cwd = metadata.cwd;
+  if (metadata?.docker) {
+    draft.values.docker = {
+      compose_file: metadata.docker.compose_file,
+      project_name: metadata.docker.project_name,
+    };
+    draft.values.detect = { type: "docker" };
+  }
   return draft;
 }
 

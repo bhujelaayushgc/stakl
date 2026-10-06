@@ -1,0 +1,27 @@
+.directory-picker {
+  width: min(560px, 90vw);
+}
+.directory-picker-path {
+  display: block;
+  margin: 14px 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.directory-picker-folders {
+  max-height: 240px;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+.directory-picker-folders .button {
+  justify-content: flex-start;
+  text-align: left;
+  min-width: 0;
+}
+.directory-picker-folders .button span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.directory-picker-folders .button svg {
+  flex-shrink: 0;
+}

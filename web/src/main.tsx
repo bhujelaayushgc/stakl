@@ -50,6 +50,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-yaml";
 import YAML from "yaml";
 import { AppEditor } from "./AppEditor";
+import { DirectoryPicker } from "./DirectoryPicker";
 import type { DiscoverySuggestion, ObservationSource } from "./app-config";
 import {
   App,
@@ -2838,6 +2839,14 @@ function DiscoverPage({
             onKeyDown={(e) => e.key === "Enter" && path && void scan()}
           />
         </label>
+        <DirectoryPicker
+          initialPath={path}
+          disabled={busy}
+          onSelect={(selected) => {
+            setPath(selected);
+            setScanError("");
+          }}
+        />
         <button
           className="button primary"
           disabled={!path || busy}

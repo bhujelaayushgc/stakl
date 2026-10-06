@@ -62,7 +62,7 @@ make build
 ./bin/stakl
 ```
 
-The initial workspace is empty. Use **Discover apps** to scan a project directory and review suggested commands, or edit YAML directly.
+The initial workspace is empty. Use **Discover apps**, select a host directory with **Browse**, and review suggested commands, or edit YAML directly.
 
 Optionally copy `bin/stakl` to a directory on your `PATH`. No installation script, OS service registration, cloud account, or telemetry is required. Running it again opens the existing dashboard.
 

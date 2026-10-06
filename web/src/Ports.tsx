@@ -198,7 +198,9 @@ export function PortsPage({
                   </thead>
                   <tbody>
                     {section.rows.map((p) => (
-                      <tr key={`${p.protocol}:${p.port}:${p.pid}:${p.address}`}>
+                      <tr
+                        key={`${p.protocol}:${p.port}:${p.pid}:${p.address}:${p.family || ""}`}
+                      >
                         <th scope="row">
                           <code>{p.port}</code>
                           <small>{p.protocol}</small>
@@ -223,6 +225,7 @@ export function PortsPage({
                         </td>
                         <td>
                           <code>{p.address || "-"}</code>
+                          {p.family && <small>{p.family}</small>}
                         </td>
                         {!section.associated && onObserve && (
                           <td>

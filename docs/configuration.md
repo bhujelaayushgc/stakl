@@ -8,7 +8,7 @@ Paths resolve relative to the configuration directory, except Compose env files,
 
 On **Applications**, choose **Add app** to configure a local service through a form. Select Process for an executable with separate arguments, Shell for shell syntax, Docker Compose for a Compose file, or Custom for a service controlled by your own commands. Enter a display name, working directory, and start command or Compose file. The app ID is generated from the name; you can change it before adding the app.
 
-To discover projects instead, choose **Discover apps**, scan a directory, and select **Review & add**. The same form opens with the detected settings filled in. Review the command before saving; discovery identifies project files, not necessarily the correct entry point.
+To discover projects instead, choose **Discover apps**, use **Browse** to select a directory or enter its path, then scan and select **Review & add**. Browse lists folders on the machine running the Stakl controller, including when you open its dashboard from another computer. Home, Root, and Up navigate that host's filesystem; access follows the controller user's permissions. The same app form opens with the detected settings filled in. Review the command before saving; discovery identifies project files, not necessarily the correct entry point.
 
 The **Group** selector lets you choose an existing group, leave the app ungrouped, or **Create group...**. A new group and its app assignment are saved together. Canceling the editor saves neither.
 
@@ -181,11 +181,11 @@ Browser favorites can override initial `favorite` values locally. `icon` accepts
 
 Use **Observation only** to bring an existing service into the dashboard while keeping its current process manager.
 
-1. Open **Ports** and select **Observe** beside an unassociated TCP listener. Stakl fills in a TCP detection target and port; wildcard addresses become a local loopback target.
+1. Open **Ports** and select **Observe** beside an unassociated TCP listener. Stakl fills in a TCP detection target and port; wildcard addresses become a local loopback target. It rechecks the listener and tries to fill its working directory from the process metadata. If the published port identifies an accessible, unambiguous Compose project, Stakl fills its working directory, Compose file, and existing project name and uses Docker detection instead.
 2. Review the name and detection address. Select a group or create one in the same form. Add health checks, links, notes, or dependencies as needed.
 3. Select **Add app**. Stakl periodically checks availability and displays **Running externally** when detected. Saving never launches or takes ownership of the service.
 
-For Compose projects, scan their directory through **Discover apps** and select **Observe existing**. Review the Compose file and set **Project name** to the existing name shown by `docker compose ls`. Discovery finds configuration files; it does not establish whether their containers are running. Stakl uses read-only `docker compose ps` inspection and can show containers and published ports. Docker inspection failures produce unknown state.
+For Compose projects, scan their directory through **Discover apps** and select **Observe existing**. Stakl inspects running containers' Compose labels and tries to fill the working directory, Compose file, and actual project name. The app ID can differ from the existing Docker project name. Autofill requires one matching project, a single Compose file, and paths accessible on this host. If inspection fails, paths are unavailable, or several projects or files match, a warning explains why you need to review the settings manually. You can find the existing **Project name** with `docker compose ls`. Stakl uses read-only `docker compose ps` inspection for ongoing availability and can show containers and published ports. Docker inspection failures produce unknown state.
 
 You can also use **Add app**, choose **Observation only**, and configure detection manually. UDP listeners need an explicit process-name, PID-file, or command check; a TCP probe cannot verify a UDP service. Process checks require a name, including health checks for observation-only entries. Use non-mutating commands for checks.
 
