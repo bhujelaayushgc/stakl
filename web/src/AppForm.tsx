@@ -328,6 +328,8 @@ const runnerHelp: Record<string, string> = {
     "Run a command through your shell, with pipes and shell syntax supported.",
   "docker-compose": "Manage services defined in a Docker Compose file.",
   custom: "Use your own commands to control and inspect an external service.",
+  external:
+    "Monitor an existing service without starting, stopping, or owning it.",
 };
 
 export function AppForm({
@@ -356,6 +358,7 @@ export function AppForm({
     ? changeAppType(draft, pendingType)
     : null;
   const type = String(draft.values.type || "process");
+  const observing = type === "external";
   const read = (path: string) => valueAt(draft.values, path);
   const set = (path: string, value: unknown) =>
     onChange(withValue(draft, path, value));
@@ -552,11 +555,11 @@ export function AppForm({
                 text(`${path}.command`, `${caption} command`)}
               {checkType === "pidfile" &&
                 text(`${path}.path`, `${caption} PID file`)}
-              {["process", "docker"].includes(checkType) &&
+              {checkType === "process" &&
                 text(
                   `${path}.name`,
                   `${caption} process or container name`,
-                  path === "detect" && checkType === "process"
+                  path === "detect" || observing
                     ? "Required for process detection."
                     : "Leave blank to use this app.",
                 )}
@@ -642,6 +645,7 @@ export function AppForm({
             <option value="shell">Shell</option>
             <option value="docker-compose">Docker Compose</option>
             <option value="custom">Custom</option>
+            <option value="external">Observation only</option>
           </select>
         </Field>
         {text(
@@ -749,16 +753,32 @@ export function AppForm({
           </Field>
         </div>
       )}
-      {type === "docker-compose" ? (
+      {observing && (
+        <p className="muted">
+          Observation only. Stakl checks availability and health. Use the
+          service's existing manager for start, stop, restart, and logs.
+        </p>
+      )}
+      {type === "docker-compose" ||
+      (observing &&
+        (read("detect.type") === "docker" ||
+          read("health.type") === "docker")) ? (
         <div className="app-field-grid">
           {text(
             "docker.compose_file",
             "Compose file",
             "Relative to the working directory.",
           )}
-          {text("docker.project_name", "Project name")}
+          {text(
+            "docker.project_name",
+            "Project name",
+            observing
+              ? "Use the existing Compose project name shown by docker compose ls."
+              : undefined,
+          )}
         </div>
       ) : (
+        !observing &&
         text(
           "start.command",
           "Start command",
@@ -768,41 +788,44 @@ export function AppForm({
         )
       )}
 
-      <details className="app-form-section">
-        <summary>Commands and shutdown</summary>
-        {type !== "docker-compose" && (
-          <>
-            {list("start.args", "Start argument")}
-            {type !== "shell" && boolean("start.shell", "Start through shell")}
-          </>
-        )}
-        <div className="app-field-grid">
-          {select("stop.signal", "Stop signal", [
-            ["", "Default (TERM)"],
-            ...[
-              "TERM",
-              "INT",
-              "QUIT",
-              "HUP",
-              "KILL",
-              "SIGTERM",
-              "SIGINT",
-              "SIGQUIT",
-              "SIGHUP",
-              "SIGKILL",
-            ].map((v): [string, string] => [v, v]),
-          ])}
-          {duration("stop.timeout", "Stop timeout")}
-        </div>
-        {type === "custom" && (
-          <>
-            {command("stop", "Stop")}
-            {command("status", "Status")}
-            {command("restart_command", "Restart")}
-            {command("logs", "Logs")}
-          </>
-        )}
-      </details>
+      {!observing && (
+        <details className="app-form-section">
+          <summary>Commands and shutdown</summary>
+          {type !== "docker-compose" && (
+            <>
+              {list("start.args", "Start argument")}
+              {type !== "shell" &&
+                boolean("start.shell", "Start through shell")}
+            </>
+          )}
+          <div className="app-field-grid">
+            {select("stop.signal", "Stop signal", [
+              ["", "Default (TERM)"],
+              ...[
+                "TERM",
+                "INT",
+                "QUIT",
+                "HUP",
+                "KILL",
+                "SIGTERM",
+                "SIGINT",
+                "SIGQUIT",
+                "SIGHUP",
+                "SIGKILL",
+              ].map((v): [string, string] => [v, v]),
+            ])}
+            {duration("stop.timeout", "Stop timeout")}
+          </div>
+          {type === "custom" && (
+            <>
+              {command("stop", "Stop")}
+              {command("status", "Status")}
+              {command("restart_command", "Restart")}
+              {command("logs", "Logs")}
+            </>
+          )}
+        </details>
+      )}
       {type === "docker-compose" && (
         <details className="app-form-section">
           <summary>Compose options</summary>
@@ -831,16 +854,21 @@ export function AppForm({
         )}
         {list("env_file", "Environment file")}
       </details>
-      <details className="app-form-section">
+      <details className="app-form-section" open={observing ? true : undefined}>
         <summary>Health and detection</summary>
         <h3>Health</h3>
         {check("health", "Health")}
         <h3>Detection</h3>
-        <p className="muted">Recognize a service that is already running.</p>
+        <p className="muted">
+          Recognize a service that is already running. Detection establishes
+          availability, not process identity or ownership.
+        </p>
         {check("detect", "Detection")}
       </details>
       <details className="app-form-section">
-        <summary>Dependencies and startup</summary>
+        <summary>
+          {observing ? "Dependencies" : "Dependencies and startup"}
+        </summary>
         {map(
           "depends_on",
           "Dependency",
@@ -848,24 +876,26 @@ export function AppForm({
           "Dependency condition",
           "dependencies",
         )}
-        <div className="app-field-grid">
-          {boolean("autostart.enabled", "Autostart")}
-          {duration("autostart.delay", "Autostart delay")}
-          {select("restart.policy", "Restart policy", [
-            ["", "Default"],
-            ["never", "Never"],
-            ["always", "Always"],
-            ["on-failure", "On failure"],
-          ])}
-          {number("restart.max_attempts", "Maximum restart attempts")}
-          {duration("restart.delay", "Restart delay")}
-          {select("restart.backoff", "Restart backoff", [
-            ["", "Default"],
-            ["fixed", "Fixed"],
-            ["exponential", "Exponential"],
-          ])}
-          {boolean("lifecycle.stop_on_stakl_exit", "Stop when Stakl exits")}
-        </div>
+        {!observing && (
+          <div className="app-field-grid">
+            {boolean("autostart.enabled", "Autostart")}
+            {duration("autostart.delay", "Autostart delay")}
+            {select("restart.policy", "Restart policy", [
+              ["", "Default"],
+              ["never", "Never"],
+              ["always", "Always"],
+              ["on-failure", "On failure"],
+            ])}
+            {number("restart.max_attempts", "Maximum restart attempts")}
+            {duration("restart.delay", "Restart delay")}
+            {select("restart.backoff", "Restart backoff", [
+              ["", "Default"],
+              ["fixed", "Fixed"],
+              ["exponential", "Exponential"],
+            ])}
+            {boolean("lifecycle.stop_on_stakl_exit", "Stop when Stakl exits")}
+          </div>
+        )}
       </details>
       <details className="app-form-section">
         <summary>Display and notifications</summary>

@@ -1,6 +1,8 @@
 import YAML, { isAlias, isMap, isNode, isScalar, isSeq, visit } from "yaml";
+import type { ListeningPort } from "./types";
 
-export type AppType = "process" | "shell" | "docker-compose" | "custom";
+export type AppType =
+  "process" | "shell" | "docker-compose" | "custom" | "external";
 export type DiscoverySuggestion = {
   path: string;
   type: string;
@@ -8,6 +10,7 @@ export type DiscoverySuggestion = {
   indicator: string;
   name: string;
 };
+export type ObservationSource = ListeningPort | DiscoverySuggestion;
 export type AppDraft = {
   id: string;
   values: Record<string, unknown>;
@@ -17,7 +20,13 @@ export type AppDraft = {
   rowErrors?: Record<string, string>;
 };
 export class UnsafeAppSourceError extends Error {}
-const types = new Set(["process", "shell", "docker-compose", "custom"]);
+const types = new Set([
+  "process",
+  "shell",
+  "docker-compose",
+  "custom",
+  "external",
+]);
 export const validConfigID = (id: string) => /^[A-Za-z0-9_-]+$/.test(id);
 const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
@@ -305,6 +314,43 @@ export function loadAppDraft(raw: string, id: string): AppDraft {
   return { id, values: normalized(isMap(node) ? node.toJSON() : null, node) };
 }
 
+export function createObservationDraft(
+  raw: string,
+  source: ObservationSource,
+): AppDraft {
+  const listener = "protocol" in source;
+  if (listener && source.protocol !== "TCP")
+    throw Error(
+      "UDP listeners need an explicit process, PID file, or command detection check. Use Add app and choose Observation only.",
+    );
+  if (!listener && source.type !== "docker-compose")
+    throw Error(
+      "Only Compose projects can be observed from project discovery.",
+    );
+  const draft = createAppDraft(raw, {
+    name: listener
+      ? `${source.process || "Service"} ${source.port}`
+      : source.name,
+    path: listener ? "" : source.path,
+    type: listener ? "process" : "docker-compose",
+    command: "",
+    indicator: listener ? "" : source.indicator,
+  });
+  draft.values.type = "external";
+  delete draft.values.start;
+  if (listener) {
+    const address = source.address.replace(/^\[|\]$/g, "");
+    const host = ["", "*", "0.0.0.0"].includes(address)
+      ? "127.0.0.1"
+      : address === "::"
+        ? "::1"
+        : address;
+    draft.values.detect = { type: "tcp", host, port: source.port };
+    draft.values.ports = [{ name: "TCP", port: source.port }];
+  } else draft.values.detect = { type: "docker" };
+  return draft;
+}
+
 export function formatAppYAML(raw: string, id: string): string {
   const doc = document(raw);
   appMap(doc);
@@ -435,8 +481,12 @@ export function changeAppType(
       removedPaths.push(key);
     }
   };
-  if (type === "docker-compose") remove("start");
+  if (type === "docker-compose" || type === "external") remove("start");
   else remove("docker");
+  if (type === "external") {
+    for (const key of ["stop", "autostart", "restart", "lifecycle"])
+      remove(key);
+  }
   if (type !== "custom") {
     for (const key of ["status", "logs", "restart_command"]) remove(key);
     if (record(values.stop) && Object.hasOwn(values.stop, "command")) {

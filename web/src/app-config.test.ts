@@ -29,6 +29,15 @@ apps:
 `;
 
 describe("source-preserving app configuration", () => {
+  it("switching to observation removes lifecycle settings with explicit review", () => {
+    const draft = loadAppDraft(raw, "worker");
+    const next = changeAppType(draft, "external");
+    expect(next.removedPaths).toContain("start");
+    expect(next.removedPaths).toContain("autostart");
+    expect(next.draft.values).not.toHaveProperty("start");
+    expect(next.draft.values).not.toHaveProperty("autostart");
+    expect(next.draft.values.depends_on).toEqual(draft.values.depends_on);
+  });
   it("preserves scalar spellings in unrelated apps during a changed save", () => {
     const source =
       "version: 1\napps:\n  worker: {name: Worker, type: process, start: {command: sleep}}\n  other: {type: process, start: {command: sleep}, env: {TOKEN: 001234, FLAG: TRUE}}\n";

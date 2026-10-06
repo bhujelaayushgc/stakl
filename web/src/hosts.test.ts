@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   appKey,
   canControlHost,
+  canControlApp,
   flattenHosts,
   hostAppPath,
   hostRequest,
@@ -19,6 +20,18 @@ const host: HostDescription = {
   error: "",
 };
 afterEach(() => vi.unstubAllGlobals());
+it("observation permissions preserve directory access without enabling lifecycle actions", () => {
+  const observed = { config: { type: "external" } } as App;
+  expect(canControlApp(observed, "directory")).toBe(true);
+  expect(canControlApp(observed, "terminal")).toBe(true);
+  expect(canControlApp(observed, "start")).toBe(false);
+  expect(
+    canControlApp(
+      { ...observed, host: { ...host, access: "read" } },
+      "directory",
+    ),
+  ).toBe(false);
+});
 it("host identity and permissions", () => {
   expect(appKey(host, "api")).not.toBe(
     appKey({ ...host, controller_id: "controller-b" }, "api"),

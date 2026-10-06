@@ -4,6 +4,7 @@ import { AppForm } from "./AppForm";
 import {
   buildAppConfiguration,
   createAppDraft,
+  createObservationDraft,
   formatAppYAML,
   loadAppDraft,
   parseAppYAML,
@@ -11,6 +12,7 @@ import {
   validConfigID,
   type AppDraft,
   type DiscoverySuggestion,
+  type ObservationSource,
 } from "./app-config";
 import { request, RequestError, type Config } from "./types";
 import { PageHeader } from "./ui";
@@ -19,6 +21,7 @@ import "./app-editor.css";
 export type AppEditorProps = {
   appID?: string;
   suggestion?: DiscoverySuggestion;
+  observation?: ObservationSource;
   onSaved: (id: string) => void;
   onCancel: () => void;
   onOpenConfig: () => void;
@@ -39,10 +42,18 @@ function fieldErrors(
   if (creating && !String(draft.values.name || "").trim())
     errors.name = "Enter a display name.";
   if (
-    (draft.values.type || "process") !== "docker-compose" &&
+    !["docker-compose", "external"].includes(
+      String(draft.values.type || "process"),
+    ) &&
     !String((draft.values.start as { command?: string })?.command || "").trim()
   )
     errors["start.command"] = "Enter the command to start this app.";
+  if (
+    draft.values.type === "external" &&
+    !(draft.values.detect as { type?: string })?.type
+  )
+    errors["detect.type"] =
+      "Choose how Stakl should detect this existing service.";
   if (draft.newGroup) {
     if (!draft.newGroup.name.trim())
       errors["newGroup.name"] = "Enter the new group name.";
@@ -59,6 +70,7 @@ function fieldErrors(
 export function AppEditor({
   appID,
   suggestion,
+  observation,
   onSaved,
   onCancel,
   onOpenConfig,
@@ -100,7 +112,9 @@ export function AppEditor({
       const current = await request<Config>("/config?raw=true");
       const initial = appID
         ? loadAppDraft(current.raw || "", appID)
-        : createAppDraft(current.raw || "", suggestion);
+        : observation
+          ? createObservationDraft(current.raw || "", observation)
+          : createAppDraft(current.raw || "", suggestion);
       if (index !== loadIndex.current) return;
       setSource(current);
       setOriginal(initial);
@@ -115,7 +129,7 @@ export function AppEditor({
     } finally {
       if (index === loadIndex.current) setLoading(false);
     }
-  }, [appID, suggestion]);
+  }, [appID, suggestion, observation]);
   useEffect(() => {
     void load();
     return () => {
@@ -251,15 +265,19 @@ export function AppEditor({
       <PageHeader
         title={
           creating
-            ? suggestion
-              ? "Review application"
-              : "Add app"
+            ? observation
+              ? "Observe existing service"
+              : suggestion
+                ? "Review application"
+                : "Add app"
             : "Edit app"
         }
         description={
-          suggestion
-            ? "Review the suggested command and settings before adding. Nothing runs automatically."
-            : "Configure an application on this local controller."
+          observation
+            ? "Review the detection target, name, and group. The service stays under its existing manager."
+            : suggestion
+              ? "Review the suggested command and settings before adding. Nothing runs automatically."
+              : "Configure an application on this local controller."
         }
       />
       {loading ? (
@@ -385,9 +403,9 @@ export function AppEditor({
               )}
               <div className="app-editor-footer">
                 <p>
-                  Saving backs up and reloads configuration. Command and
-                  environment changes apply on the next start or restart; saving
-                  does not restart a running app.
+                  {draft.values.type === "external"
+                    ? "Saving backs up and reloads configuration. Observation checks update without controlling the service."
+                    : "Saving backs up and reloads configuration. Command and environment changes apply on the next start or restart; saving does not restart a running app."}
                 </p>
                 <div className="inline-actions">
                   <button

@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import YAML from "yaml";
 import { AppEditor } from "./AppEditor";
 import type { DiscoverySuggestion } from "./app-config";
+import type { ListeningPort } from "./types";
 
 const raw = `# preserved workspace
 version: 1
@@ -30,6 +31,7 @@ function setup({
   validationError = "",
   saveDelay,
   suggestion,
+  observation,
 }: {
   editing?: boolean;
   source?: string;
@@ -37,6 +39,7 @@ function setup({
   validationError?: string;
   saveDelay?: Promise<void>;
   suggestion?: DiscoverySuggestion;
+  observation?: ListeningPort;
 } = {}) {
   const server = {
     raw: source,
@@ -82,6 +85,7 @@ function setup({
         <AppEditor
           appID={editing ? "worker" : undefined}
           suggestion={suggestion}
+          observation={observation}
           onSaved={setSaved}
           onCancel={() => setCanceled(true)}
           onOpenConfig={() => setFullEditor(true)}
@@ -103,6 +107,50 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+it("reviews a listener as observation-only and saves checks and a group without launch commands", async () => {
+  const server = setup({
+    editing: false,
+    observation: {
+      port: 5432,
+      protocol: "TCP",
+      address: "*",
+      pid: 43,
+      pgid: 43,
+      process: "postgres",
+    },
+  });
+  expect(
+    await screen.findByLabelText("Display name", { exact: true }),
+  ).toHaveValue("postgres 5432");
+  expect(screen.getByLabelText("App type", { exact: true })).toHaveValue(
+    "external",
+  );
+  expect(
+    screen.queryByLabelText("Start command", { exact: true }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByLabelText("Autostart", { exact: true }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Detection host", { exact: true })).toHaveValue(
+    "127.0.0.1",
+  );
+  change("Group", "__create_group__");
+  change("New group name", "Existing services");
+  fireEvent.click(screen.getByRole("button", { name: "Add app" }));
+  await screen.findByText("Saved postgres-5432");
+  const app = YAML.parse(server.raw).apps["postgres-5432"];
+  expect(app).toMatchObject({
+    type: "external",
+    group: "existing-services",
+    detect: { type: "tcp", host: "127.0.0.1", port: 5432 },
+    ports: [{ name: "TCP", port: 5432 }],
+  });
+  for (const key of ["start", "stop", "autostart", "restart", "pid"])
+    expect(app).not.toHaveProperty(key);
+  expect(server.requests.every((path) => path.startsWith("/api/config"))).toBe(
+    true,
+  );
 });
 it("keeps a manually chosen creation ID after returning from YAML mode", async () => {
   const server = setup({ editing: false });

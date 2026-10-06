@@ -18,7 +18,7 @@ export interface AppConfig {
   start: { command: string; args?: string[] };
   stop: { command?: string };
   health: { type: string };
-  detect: { type: string };
+  detect: { type: string; host?: string; port?: number };
   depends_on: Record<string, { condition: string }>;
   links: Record<string, string>;
   ports: { name: string; port: number }[];
@@ -100,6 +100,19 @@ export function servicePorts(app: App, listeners: ListeningPort[]) {
         listeners.some((l) => l.protocol === "TCP" && l.port === p.port),
     });
   }
+  if (
+    config.type === "external" &&
+    ["tcp", "port"].includes(config.detect?.type) &&
+    config.detect.port
+  ) {
+    const port = config.detect.port;
+    if (!ports.has(`TCP:${port}`))
+      ports.set(`TCP:${port}`, {
+        port,
+        protocol: "TCP",
+        occupied: app.runtime.state === "external",
+      });
+  }
   if (isActive(app.runtime.state)) {
     for (const container of app.containers || []) {
       if (container.state !== "running") continue;
@@ -170,8 +183,9 @@ export const isActive = (s: Status) =>
     "stopping",
   ].includes(s);
 export const canStopApp = (app: App) =>
-  app.runtime.owned ||
-  (app.config.type === "custom" && !!app.config.stop?.command);
+  app.config.type !== "external" &&
+  (app.runtime.owned ||
+    (app.config.type === "custom" && !!app.config.stop?.command));
 export const label = (s: string) =>
   ({
     active: "All running",
@@ -187,7 +201,11 @@ export const label = (s: string) =>
     failed: "Failed",
   })[s] || s;
 export const typeLabel = (s: string) =>
-  s === "docker-compose" ? "Compose" : s.charAt(0).toUpperCase() + s.slice(1);
+  s === "external"
+    ? "Observation only"
+    : s === "docker-compose"
+      ? "Compose"
+      : s.charAt(0).toUpperCase() + s.slice(1);
 export function filterApps(
   apps: App[],
   search: string,

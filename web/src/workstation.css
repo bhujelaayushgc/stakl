@@ -1309,7 +1309,8 @@
   .discover-page .discovery-row > .app-symbol {
     display: flex;
   }
-  .discover-page .discovery-row > .button {
+  .discover-page .discovery-row > .button,
+  .discover-page .discovery-row > .discovery-actions {
     grid-column: 2;
     justify-self: start;
   }

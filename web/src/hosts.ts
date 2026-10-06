@@ -50,8 +50,10 @@ export const identity = (app: App): string =>
   app.host ? appKey(app.host, app.config.id) : app.config.id;
 export const isLiveApp = (app: App): boolean =>
   !app.host || (app.host.state === "online" && !app.host.stale);
-export const canControlApp = (app: App): boolean =>
-  !app.host || canControlHost(app.host);
+export const canControlApp = (app: App, action = "start"): boolean =>
+  (app.config.type !== "external" ||
+    ["directory", "terminal"].includes(action)) &&
+  (!app.host || canControlHost(app.host));
 export const remoteLoopback = (app: App, link: string): boolean => {
   if (!app.host || app.host.id === "local") return false;
   try {

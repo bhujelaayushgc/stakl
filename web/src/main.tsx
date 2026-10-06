@@ -50,7 +50,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-yaml";
 import YAML from "yaml";
 import { AppEditor } from "./AppEditor";
-import type { DiscoverySuggestion } from "./app-config";
+import type { DiscoverySuggestion, ObservationSource } from "./app-config";
 import {
   App,
   HostEnvelope,
@@ -208,6 +208,7 @@ export function AppShell() {
     [appEditor, setAppEditor] = useState<{
       appID?: string;
       suggestion?: DiscoverySuggestion;
+      observation?: ObservationSource;
     } | null>(null),
     [palette, setPalette] = useState(false),
     [confirm, setConfirm] = useState<{
@@ -476,7 +477,7 @@ export function AppShell() {
     if (
       !profile &&
       target &&
-      (!canControlApp(target) || busy.has(identity(target)))
+      (!canControlApp(target, action) || busy.has(identity(target)))
     )
       return;
     if (
@@ -960,6 +961,7 @@ export function AppShell() {
             <AppEditor
               appID={appEditor.appID}
               suggestion={appEditor.suggestion}
+              observation={appEditor.observation}
               onDirtyChange={setEditorDirty}
               onOpenConfig={() => nav("config")}
               onCancel={() => {
@@ -1229,13 +1231,17 @@ export function AppShell() {
                     onChange={(e) => setType(e.target.value)}
                   >
                     <option value="">All types</option>
-                    {["process", "shell", "docker-compose", "custom"].map(
-                      (s) => (
-                        <option key={s} value={s}>
-                          {typeLabel(s)}
-                        </option>
-                      ),
-                    )}
+                    {[
+                      "process",
+                      "shell",
+                      "docker-compose",
+                      "custom",
+                      "external",
+                    ].map((s) => (
+                      <option key={s} value={s}>
+                        {typeLabel(s)}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 {loading ? (
@@ -1376,6 +1382,7 @@ export function AppShell() {
             <div hidden={!!appEditor}>
               <DiscoverPage
                 onReview={(suggestion) => setAppEditor({ suggestion })}
+                onObserve={(observation) => setAppEditor({ observation })}
                 onError={setError}
               />
             </div>
@@ -1396,7 +1403,15 @@ export function AppShell() {
             />
           )}
           {page === "system" && <SystemPage />}
-          {page === "ports" && <PortsPage apps={localApps} {...ports} />}
+          {page === "ports" && (
+            <div hidden={!!appEditor}>
+              <PortsPage
+                apps={localApps}
+                {...ports}
+                onObserve={(observation) => setAppEditor({ observation })}
+              />
+            </div>
+          )}
         </main>
       </div>
       <Dialog.Root open={!!selected} onOpenChange={(o) => !o && closeDetail()}>
@@ -1558,6 +1573,15 @@ function ProfileCard({
   run: Action;
 }) {
   const s = profileState(profile, apps);
+  const managed = profileState(
+    {
+      ...profile,
+      apps: profile.apps.filter((id) =>
+        apps.some((a) => a.config.id === id && a.config.type !== "external"),
+      ),
+    },
+    apps,
+  );
   return (
     <article className="profile-row workstation-list-row">
       <div className="profile-identity">
@@ -1584,7 +1608,7 @@ function ProfileCard({
         {s.running === 0 ? "Stopped" : `${s.running}/${s.total} running`}
       </span>
       <div className="profile-actions workstation-action-row">
-        {s.running > 0 && (
+        {managed.running > 0 && (
           <IconButton
             label={`Restart ${profile.name}`}
             disabled={busy}
@@ -1593,21 +1617,25 @@ function ProfileCard({
             <RefreshCw size={14} aria-hidden="true" />
           </IconButton>
         )}
-        <button
-          className={`button small ${s.running ? "" : "primary"}`}
-          aria-label={`${s.running ? "Stop" : "Start"} ${profile.name} profile`}
-          disabled={busy}
-          onClick={() => run(id, s.running ? "stop" : "start", true)}
-        >
-          {busy ? (
-            <LoaderCircle className="spin" size={13} aria-hidden="true" />
-          ) : s.running ? (
-            <Square size={12} aria-hidden="true" />
-          ) : (
-            <Play size={12} aria-hidden="true" />
-          )}{" "}
-          {s.running ? "Stop" : "Start"}
-        </button>
+        {managed.total > 0 ? (
+          <button
+            className={`button small ${managed.running ? "" : "primary"}`}
+            aria-label={`${managed.running ? "Stop" : "Start"} ${profile.name} profile`}
+            disabled={busy}
+            onClick={() => run(id, managed.running ? "stop" : "start", true)}
+          >
+            {busy ? (
+              <LoaderCircle className="spin" size={13} aria-hidden="true" />
+            ) : managed.running ? (
+              <Square size={12} aria-hidden="true" />
+            ) : (
+              <Play size={12} aria-hidden="true" />
+            )}{" "}
+            {managed.running ? "Stop" : "Start"}
+          </button>
+        ) : (
+          <span className="muted">Observation only</span>
+        )}
       </div>
     </article>
   );
@@ -1697,13 +1725,15 @@ function AppRow({
         )}
       </div>
       <div className="row-actions workstation-action-row">
-        <IconButton
-          label={`Logs for ${a.config.name}`}
-          onClick={() => onOpen("Logs")}
-        >
-          <Terminal size={16} aria-hidden="true" />
-        </IconButton>
-        {(!active || canStop) && (
+        {a.config.type !== "external" && (
+          <IconButton
+            label={`Logs for ${a.config.name}`}
+            onClick={() => onOpen("Logs")}
+          >
+            <Terminal size={16} aria-hidden="true" />
+          </IconButton>
+        )}
+        {a.config.type !== "external" && (!active || canStop) && (
           <button
             className={`button small ${!active ? "start-button" : ""}`}
             aria-label={`${active ? "Stop" : "Start"} ${a.config.name}`}
@@ -1817,33 +1847,37 @@ function Detail({
         </span>
       </div>
       <div className="detail-actions">
-        <button
-          className={`button${active ? "" : " primary"}`}
-          disabled={
-            blocked ||
-            busy ||
-            (active && !canStop) ||
-            a.runtime.state === "unknown"
-          }
-          onClick={() => run(a.config.id, active ? "stop" : "start")}
-        >
-          {busy ? (
-            <LoaderCircle className="spin" size={15} aria-hidden="true" />
-          ) : active ? (
-            <Square size={13} aria-hidden="true" />
-          ) : (
-            <Play size={13} aria-hidden="true" />
-          )}{" "}
-          {active ? "Stop" : "Start"}
-        </button>
-        <button
-          className="button"
-          disabled={busy || blocked || (active && !canStop)}
-          onClick={() => run(a.config.id, "restart")}
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-          Restart
-        </button>
+        {a.config.type !== "external" && (
+          <>
+            <button
+              className={`button${active ? "" : " primary"}`}
+              disabled={
+                blocked ||
+                busy ||
+                (active && !canStop) ||
+                a.runtime.state === "unknown"
+              }
+              onClick={() => run(a.config.id, active ? "stop" : "start")}
+            >
+              {busy ? (
+                <LoaderCircle className="spin" size={15} aria-hidden="true" />
+              ) : active ? (
+                <Square size={13} aria-hidden="true" />
+              ) : (
+                <Play size={13} aria-hidden="true" />
+              )}{" "}
+              {active ? "Stop" : "Start"}
+            </button>
+            <button
+              className="button"
+              disabled={busy || blocked || (active && !canStop)}
+              onClick={() => run(a.config.id, "restart")}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              Restart
+            </button>
+          </>
+        )}
         {Object.entries(a.config.links || {}).map(([name, url]) =>
           remoteLoopback(a, url) ? (
             <span className="remote-link" key={name}>
@@ -1963,12 +1997,22 @@ function Detail({
                 </button>
               </div>
             )}
-            <h3>Start command</h3>
-            <code className="code-block">
-              {a.config.type === "docker-compose"
-                ? `docker compose -f ${a.config.docker.compose_file} --project-name ${a.config.docker.project_name} up -d`
-                : a.config.start.command}
-            </code>
+            {a.config.type === "external" ? (
+              <p className="muted">
+                Observation only. Lifecycle actions and logs stay with the
+                service's existing manager. Detection establishes availability
+                without process ownership.
+              </p>
+            ) : (
+              <>
+                <h3>Start command</h3>
+                <code className="code-block">
+                  {a.config.type === "docker-compose"
+                    ? `docker compose -f ${a.config.docker.compose_file} --project-name ${a.config.docker.project_name} up -d`
+                    : a.config.start.command}
+                </code>
+              </>
+            )}
             {Object.keys(a.config.depends_on || {}).length > 0 && (
               <>
                 <h3>Dependencies</h3>
@@ -2075,7 +2119,13 @@ function Detail({
               )}
           </>
         )}
-        {tab === "Logs" && (
+        {tab === "Logs" && a.config.type === "external" && (
+          <p className="muted">
+            Stakl does not capture logs for observation-only apps. View them
+            through the service's existing manager.
+          </p>
+        )}
+        {tab === "Logs" && a.config.type !== "external" && (
           <LogViewer
             id={a.config.id}
             hostID={a.host?.id || "local"}
@@ -2728,9 +2778,11 @@ function ConfigPage({
 }
 function DiscoverPage({
   onReview,
+  onObserve,
   onError,
 }: {
   onReview: (suggestion: DiscoverySuggestion) => void;
+  onObserve: (suggestion: DiscoverySuggestion) => void;
   onError: (message: string) => void;
 }) {
   const [path, setPath] = useState("");
@@ -2835,16 +2887,29 @@ function DiscoverPage({
                   {row.command ? " · " + row.command : ""}
                 </span>
               </div>
-              <button
-                className="button small"
-                onClick={() => {
-                  onError("");
-                  onReview(row);
-                }}
-              >
-                <Plus size={14} aria-hidden="true" />
-                Review &amp; add
-              </button>
+              <div className="discovery-actions inline-actions">
+                <button
+                  className="button small"
+                  onClick={() => {
+                    onError("");
+                    onReview(row);
+                  }}
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  Review &amp; add
+                </button>
+                {row.type === "docker-compose" && (
+                  <button
+                    className="button small"
+                    onClick={() => {
+                      onError("");
+                      onObserve(row);
+                    }}
+                  >
+                    Observe existing
+                  </button>
+                )}
+              </div>
             </div>
           ))}
           {!rows.length && (
