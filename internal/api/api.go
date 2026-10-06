@@ -463,7 +463,7 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []Suggestion{}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	count := 0
 	e := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -484,9 +484,6 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		dir := filepath.Dir(path)
-		if seen[dir] {
-			return nil
-		}
 		s := Suggestion{Path: dir, Type: "process", Indicator: d.Name(), Name: filepath.Base(dir)}
 		switch d.Name() {
 		case "compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml":
@@ -524,7 +521,13 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 		default:
 			return nil
 		}
-		seen[dir] = true
+		if index, ok := seen[dir]; ok {
+			if s.Type == "docker-compose" && out[index].Type != "docker-compose" {
+				out[index] = s
+			}
+			return nil
+		}
+		seen[dir] = len(out)
 		out = append(out, s)
 		return nil
 	})

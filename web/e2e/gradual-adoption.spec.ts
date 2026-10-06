@@ -178,9 +178,10 @@ test("Compose discovery can add an observation without a launch command", async 
   );
   await mkdir(path, { recursive: true });
   await writeFile(
-    join(path, "compose.yml"),
+    join(path, "docker-compose.yml"),
     "services:\n  api:\n    image: nginx:alpine\n",
   );
+  await writeFile(join(path, "Makefile"), "up:\n\tdocker compose up -d\n");
   const i = instance();
   await page.goto(`${i.url}/?token=${i.token}`);
   await page
@@ -211,7 +212,7 @@ test("Compose discovery can add an observation without a launch command", async 
     type: "external",
     detect: { type: "docker" },
     docker: {
-      compose_file: "compose.yml",
+      compose_file: "docker-compose.yml",
       project_name: "actual-existing-project",
     },
   });
