@@ -58,12 +58,32 @@ type Base struct {
 type Process struct{ Base }
 type Compose struct{ Base }
 type Custom struct{ Base }
+type External struct{ Base }
 
 func Registry(dir string, l config.Logging) map[string]Runner {
 	b := Base{dir, l}
 	p := &Process{b}
-	return map[string]Runner{"process": p, "shell": p, "docker-compose": &Compose{b}, "custom": &Custom{b}}
+	return map[string]Runner{"process": p, "shell": p, "docker-compose": &Compose{b}, "custom": &Custom{b}, "external": &External{b}}
 }
+
+func (e *External) Start(context.Context, config.App) (Runtime, error) {
+	return Runtime{}, fmt.Errorf("observation-only apps cannot be started")
+}
+func (e *External) Stop(context.Context, config.App, Runtime, bool) error {
+	return fmt.Errorf("observation-only apps cannot be stopped")
+}
+func (e *External) Status(ctx context.Context, a config.App, _ Runtime) (Status, error) {
+	if a.Detect.Type == "docker" || a.Health.Type == "docker" {
+		st, err := (&Compose{e.Base}).Status(ctx, a, Runtime{})
+		if a.Detect.Type != "docker" {
+			st.Running, st.External = false, false
+		}
+		return st, err
+	}
+	// The manager's detection check establishes availability, never ownership.
+	return Status{}, nil
+}
+func (e *External) LogCommand(config.App) config.Command { return config.Command{} }
 func Environment(a config.App) ([]string, error) {
 	m := map[string]string{}
 	if a.InheritEnv == nil || *a.InheritEnv {

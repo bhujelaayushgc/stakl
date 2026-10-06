@@ -10,6 +10,38 @@ import (
 	"time"
 )
 
+func TestObservationConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	base := "version: 1\napps:\n  db:\n    type: external\n    detect: {type: tcp, port: 5432}\n"
+	c, err := Parse([]byte(base), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Apps["db"].Start.Command != "" || c.Apps["db"].Detect.Host != "127.0.0.1" {
+		t.Fatalf("unexpected observation configuration: %+v", c.Apps["db"])
+	}
+	for name, extra := range map[string]string{
+		"start":           "start: {command: sleep}",
+		"start arguments": "start: {args: ['60']}",
+		"stop":            "stop: {command: kill}",
+		"status":          "status: {command: true}",
+		"logs":            "logs: {command: tail}",
+		"restart command": "restart_command: {command: true}",
+		"autostart":       "autostart: true",
+		"restart policy":  "restart: {policy: always}",
+		"stop on exit":    "lifecycle: {stop_on_stakl_exit: true}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(base+"    "+extra+"\n"), dir); err == nil {
+				t.Fatal("observation entry accepted lifecycle configuration")
+			}
+		})
+	}
+	if _, err := Parse([]byte("version: 1\napps: {db: {type: external}}\n"), dir); err == nil {
+		t.Fatal("observation entry accepted without detection")
+	}
+}
+
 func TestTLSConfigPair(t *testing.T) {
 	dir := t.TempDir()
 	for _, setting := range []string{"tls_cert_file: cert.pem", "tls_key_file: key.pem"} {

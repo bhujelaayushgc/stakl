@@ -132,7 +132,13 @@ func New(c *config.Config, path, dir string, db *storage.Store) *Manager {
 			t.Runtime.State = "unknown"
 			t.Runtime.Error = t.RecoveryError
 		}
-		if t.Runtime.Launch == "" && !Active(t.Runtime) {
+		if c.Apps[id].Type == "external" && !t.Runtime.Owned && t.Runtime.Launch == "" {
+			// Availability from a previous controller session is not a fresh
+			// dependency check. The monitor will establish it again.
+			t.Runtime = runner.Runtime{State: "stopped", Health: "unknown"}
+			t.Effective = c.Apps[id]
+		}
+		if t.Runtime.Launch == "" && (!Active(t.Runtime) || (t.Effective.Type == "external" && !t.Runtime.Owned)) {
 			t.Effective = c.Apps[id]
 		}
 		if (t.Runtime.State == "starting" || t.Runtime.State == "stopping") && t.Runtime.Launch == "" {
@@ -356,7 +362,7 @@ func (m *Manager) refresh(id string) {
 	}
 	m.mu.Lock()
 	t, ok = m.apps[id]
-	if !ok || t.Runtime.Launch != r.Launch || t.Runtime.State != r.State {
+	if !ok || t.Runtime.Launch != r.Launch || t.Runtime.State != r.State || !reflect.DeepEqual(t.Effective, a) {
 		m.mu.Unlock()
 		return
 	}
@@ -530,20 +536,33 @@ func (m *Manager) Operate(ctx context.Context, action string, ids []string, forc
 		return map[string]string{"error": "Stakl is shutting down"}
 	}
 	c := m.Config()
-	order, e := c.Order(ids)
 	out := map[string]string{}
+	roots := []string{}
+	for _, id := range ids {
+		if c.Apps[id].Type == "external" {
+			out[id] = "observation-only: use the service's existing manager for lifecycle actions"
+		} else {
+			roots = append(roots, id)
+		}
+	}
+	order, e := c.Order(roots)
 	if e != nil {
 		out["error"] = e.Error()
 		return out
 	}
 	selected := map[string]bool{}
-	for _, id := range ids {
+	for _, id := range roots {
 		selected[id] = true
+	}
+	for _, id := range order {
+		if c.Apps[id].Type == "external" && out[id] == "" {
+			out[id] = "ok"
+		}
 	}
 	if action == "stop" || action == "kill" {
 		for i := len(order) - 1; i >= 0; i-- {
 			id := order[i]
-			if selected[id] {
+			if selected[id] && out[id] == "" {
 				if e := m.stopOne(ctx, id, force || action == "kill"); e != nil {
 					out[id] = e.Error()
 				} else {
@@ -555,6 +574,9 @@ func (m *Manager) Operate(ctx context.Context, action string, ids []string, forc
 	}
 	if action == "restart" {
 		for _, id := range ids {
+			if out[id] != "" {
+				continue
+			}
 			m.mu.RLock()
 			t := m.apps[id]
 			a := t.Effective
@@ -593,7 +615,7 @@ func (m *Manager) Operate(ctx context.Context, action string, ids []string, forc
 		a := c.Apps[id]
 		blocked := ""
 		for dep, d := range a.DependsOn {
-			if msg := out[dep]; msg != "" && msg != "ok" {
+			if msg := out[dep]; msg != "" && msg != "ok" && c.Apps[dep].Type != "external" {
 				blocked = fmt.Sprintf("dependency %s failed: %s", dep, msg)
 				break
 			}
@@ -643,6 +665,10 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 	}
 	a := m.cfg.Apps[id]
 	r := t.Runtime
+	if a.Type == "external" || t.Effective.Type == "external" {
+		m.mu.Unlock()
+		return fmt.Errorf("%s is observation-only", a.Name)
+	}
 	reg := m.registry[a.Type]
 	if Active(r) {
 		m.mu.Unlock()
@@ -743,6 +769,10 @@ func (m *Manager) stopOne(ctx context.Context, id string, force bool) error {
 	}
 	a := t.Effective
 	r := t.Runtime
+	if a.Type == "external" || m.cfg.Apps[id].Type == "external" {
+		m.mu.Unlock()
+		return fmt.Errorf("%s is observation-only", a.Name)
+	}
 	reg := m.registry[a.Type]
 	t.Runtime.NextRestart = nil
 	if !Active(r) && r.Launch == "" {
@@ -855,7 +885,13 @@ func (m *Manager) Profile(ctx context.Context, id, action string) map[string]str
 	if !ok {
 		return map[string]string{"error": "unknown profile"}
 	}
-	out := m.Operate(ctx, action, p.Apps, false)
+	ids := []string{}
+	for _, appID := range p.Apps {
+		if m.Config().Apps[appID].Type != "external" {
+			ids = append(ids, appID)
+		}
+	}
+	out := m.Operate(ctx, action, ids, false)
 	kind := "profile." + map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[action]
 	for _, msg := range out {
 		if msg != "ok" {
@@ -875,7 +911,7 @@ func (m *Manager) GlobalIDs(runningOnly bool) []string {
 	}
 	ids := []string{}
 	for _, v := range m.Views() {
-		if !exclude[v.Config.ID] && (!runningOnly || Active(v.Runtime)) {
+		if v.Config.Type != "external" && !exclude[v.Config.ID] && (!runningOnly || Active(v.Runtime)) {
 			ids = append(ids, v.Config.ID)
 		}
 	}
@@ -888,7 +924,12 @@ func (m *Manager) Reload() error {
 	if e == nil {
 		m.mu.RLock()
 		for id, t := range m.apps {
-			if _, ok := c.Apps[id]; !ok && (Active(t.Runtime) || t.Runtime.Launch != "") {
+			observation := t.Effective.Type == "external" && !t.Runtime.Owned && t.Runtime.Launch == ""
+			if a, ok := c.Apps[id]; ok && a.Type != t.Effective.Type && (a.Type == "external" || t.Effective.Type == "external") && (t.Runtime.Owned || t.Runtime.Launch != "") {
+				e = fmt.Errorf("cannot change observation mode for active app %s; stop it first", id)
+				break
+			}
+			if _, ok := c.Apps[id]; !ok && !observation && (Active(t.Runtime) || t.Runtime.Launch != "") {
 				e = fmt.Errorf("cannot remove active app %s; stop it before removing its configuration", id)
 				break
 			}
@@ -907,8 +948,17 @@ func (m *Manager) Reload() error {
 	}
 	for id, a := range c.Apps {
 		if t, ok := m.apps[id]; ok {
-			if !Active(t.Runtime) && t.Runtime.Launch == "" {
+			if t.Runtime.Launch == "" && (!Active(t.Runtime) || (!t.Runtime.Owned && (t.Effective.Type == "external" || a.Type == "external"))) {
+				if (t.Effective.Type == "external" || a.Type == "external") && !reflect.DeepEqual(t.Effective, a) {
+					t.Runtime.State = "stopped"
+					t.Runtime.Health = "unknown"
+					t.Runtime.Error = ""
+					t.Failures, t.Successes = 0, 0
+					t.Containers = nil
+					t.Ports = map[int]bool{}
+				}
 				t.Effective = a
+				t.LastCheck = time.Time{}
 			}
 		} else {
 			m.apps[id] = &tracked{Runtime: runner.Runtime{State: "stopped", Health: "unknown"}, Effective: a, Ports: map[int]bool{}}
