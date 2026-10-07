@@ -168,6 +168,56 @@ test("adopts a real listener through forms without acquiring lifecycle control",
   }
 });
 
+test("observes an IPv6-only wildcard listener as running externally", async ({
+  page,
+  request,
+}) => {
+  const server = createServer((_req, res) => res.end("IPv6 service"));
+  try {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen({ host: "::", port: 0, ipv6Only: true }, resolve);
+      });
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      test.skip(
+        code === "EAFNOSUPPORT" || code === "EADDRNOTAVAIL",
+        "IPv6 is unavailable on this host",
+      );
+      throw e;
+    }
+    const port = (server.address() as { port: number }).port;
+    const i = instance();
+    await page.goto(`${i.url}/?token=${i.token}`);
+    await page
+      .getByRole("navigation")
+      .getByRole("link", { name: "Ports", exact: true })
+      .click();
+    await page.getByLabel("Search ports", { exact: true }).fill(String(port));
+    await page
+      .getByRole("button", { name: `Observe TCP port ${port}`, exact: true })
+      .click();
+    await expect(
+      page.getByLabel("Detection host", { exact: true }),
+    ).toHaveValue("::1");
+    await page
+      .getByLabel("Display name", { exact: true })
+      .fill("Observed IPv6");
+    await page.getByRole("button", { name: "Add app", exact: true }).click();
+    await expect(page.locator(".toast")).toContainText("saved");
+    await expect
+      .poll(async () => (await api(request, "/apps/observed-ipv6")).runtime)
+      .toMatchObject({ state: "external", owned: false, pid: 0, launch: "" });
+  } finally {
+    if (server.listening)
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+        server.closeAllConnections();
+      });
+  }
+});
+
 test("Compose discovery can add an observation without a launch command", async ({
   page,
   request,

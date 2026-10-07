@@ -4,6 +4,7 @@ import {
   buildAppConfiguration,
   changeAppType,
   createAppDraft,
+  createObservationDraft,
   loadAppDraft,
   UnsafeAppSourceError,
 } from "./app-config";
@@ -29,6 +30,33 @@ apps:
 `;
 
 describe("source-preserving app configuration", () => {
+  it.each([
+    { address: "*", family: "IPv6" as const, host: "::1" },
+    { address: "*", family: "IPv4" as const, host: "127.0.0.1" },
+    { address: "*", family: undefined, host: "127.0.0.1" },
+    { address: "[::]", family: "IPv6" as const, host: "::1" },
+    { address: "192.168.1.10", family: "IPv4" as const, host: "192.168.1.10" },
+  ])(
+    "uses $host to observe $family listener $address",
+    ({ address, family, host }) => {
+      const draft = createObservationDraft(raw, {
+        protocol: "TCP",
+        port: 3000,
+        pid: 42,
+        pgid: 40,
+        process: "node",
+        address,
+        family,
+      });
+      const saved = YAML.parse(buildAppConfiguration(raw, draft, draft, true));
+      expect(saved.apps[draft.id].detect).toEqual({
+        type: "tcp",
+        host,
+        port: 3000,
+      });
+    },
+  );
+
   it("switching to observation removes lifecycle settings with explicit review", () => {
     const draft = loadAppDraft(raw, "worker");
     const next = changeAppType(draft, "external");

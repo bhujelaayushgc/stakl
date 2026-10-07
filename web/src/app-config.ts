@@ -347,7 +347,9 @@ export function createObservationDraft(
   if (listener) {
     const address = source.address.replace(/^\[|\]$/g, "");
     const host = ["", "*", "0.0.0.0"].includes(address)
-      ? "127.0.0.1"
+      ? source.family === "IPv6"
+        ? "::1"
+        : "127.0.0.1"
       : address === "::"
         ? "::1"
         : address;
