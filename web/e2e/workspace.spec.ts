@@ -279,7 +279,9 @@ test("destination URLs restore navigation, filters, and detail tabs", async ({
   await expect(
     page.getByRole("heading", { name: "Ports", exact: true }),
   ).toBeFocused();
-  expect(new URL(page.url()).searchParams.get("view")).toBe("ports");
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get("view") === "ports",
+  );
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Ports", exact: true }),
@@ -292,7 +294,9 @@ test("destination URLs restore navigation, filters, and detail tabs", async ({
   await page
     .getByRole("searchbox", { name: "Search applications" })
     .fill("Heartbeat");
-  expect(new URL(page.url()).searchParams.get("q")).toBe("Heartbeat");
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get("q") === "Heartbeat",
+  );
   await page.reload();
   await expect(
     page.getByRole("searchbox", { name: "Search applications" }),
@@ -301,8 +305,11 @@ test("destination URLs restore navigation, filters, and detail tabs", async ({
     .getByRole("button", { name: "Heartbeat service", exact: true })
     .click();
   await page.getByRole("tab", { name: "Health" }).click();
-  expect(new URL(page.url()).searchParams.get("app")).toBe("ticker");
-  expect(new URL(page.url()).searchParams.get("tab")).toBe("Health");
+  await expect(page).toHaveURL(
+    (url) =>
+      url.searchParams.get("app") === "ticker" &&
+      url.searchParams.get("tab") === "Health",
+  );
   await page.reload();
   await expect(page.getByRole("tab", { name: "Health" })).toHaveAttribute(
     "aria-selected",
