@@ -7,6 +7,9 @@
   overflow-wrap: anywhere;
   font-size: 12px;
 }
+.directory-picker .search-field {
+  margin-bottom: 12px;
+}
 .directory-picker-folders {
   max-height: 240px;
   overflow-y: auto;
@@ -17,6 +20,18 @@
   justify-content: flex-start;
   text-align: left;
   min-width: 0;
+}
+.directory-picker-folders .button[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.directory-picker-shortcuts {
+  margin-top: 12px;
+}
+.directory-picker-shortcuts p {
+  font-size: 11px;
+  line-height: 1.6;
 }
 .directory-picker-folders .button span {
   overflow-wrap: anywhere;

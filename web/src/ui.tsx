@@ -50,6 +50,7 @@ export function IconButton({
 }
 
 export function SearchField({
+  ref,
   label: inputLabel,
   name,
   placeholder,
@@ -57,7 +58,8 @@ export function SearchField({
   onChange,
   onClear,
   iconSize = 16,
-}: {
+  ...inputProps
+}: Omit<ComponentPropsWithRef<"input">, "onChange"> & {
   label: string;
   name: string;
   placeholder: string;
@@ -72,6 +74,8 @@ export function SearchField({
         <Search size={iconSize} aria-hidden="true" />
       </label>
       <input
+        {...inputProps}
+        ref={ref}
         type="search"
         id={name}
         aria-label={inputLabel}
