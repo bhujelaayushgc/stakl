@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { App, PortScan, request, servicePorts } from "./types";
+import {
+  App,
+  PortScan,
+  request,
+  servicePorts,
+  type ListeningPort,
+} from "./types";
 import { PageHeader, SearchField } from "./ui";
 const numberFormat = new Intl.NumberFormat();
 
@@ -41,8 +47,10 @@ export function PortsPage({
   error,
   loading,
   refresh,
+  onObserve,
 }: {
   apps: App[];
+  onObserve?: (listener: ListeningPort) => void;
 } & ReturnType<typeof usePortScan>) {
   const [query, setQuery] = useState("");
   const listeners = scan?.ports || [];
@@ -107,7 +115,7 @@ export function PortsPage({
     <>
       <PageHeader
         title="Ports"
-        description="Check occupied ports before starting another service."
+        description="Inspect local listeners or add an existing service for observation."
         actions={
           <button className="button" onClick={refresh} disabled={loading}>
             <RefreshCw
@@ -183,11 +191,16 @@ export function PortsPage({
                       {section.associated && <th scope="col">Application</th>}
                       <th scope="col">Process</th>
                       <th scope="col">Address</th>
+                      {!section.associated && onObserve && (
+                        <th scope="col">Add to Stakl</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {section.rows.map((p) => (
-                      <tr key={`${p.protocol}:${p.port}:${p.pid}:${p.address}`}>
+                      <tr
+                        key={`${p.protocol}:${p.port}:${p.pid}:${p.address}:${p.family || ""}`}
+                      >
                         <th scope="row">
                           <code>{p.port}</code>
                           <small>{p.protocol}</small>
@@ -212,7 +225,28 @@ export function PortsPage({
                         </td>
                         <td>
                           <code>{p.address || "-"}</code>
+                          {p.family && <small>{p.family}</small>}
                         </td>
+                        {!section.associated && onObserve && (
+                          <td>
+                            <button
+                              className="button small"
+                              aria-label={`Observe ${p.protocol} port ${p.port}`}
+                              disabled={p.protocol !== "TCP"}
+                              title={
+                                p.protocol !== "TCP"
+                                  ? "UDP needs an explicit check. Use Add app and choose Observation only."
+                                  : "Review an observation-only app"
+                              }
+                              onClick={() => {
+                                const { occupied: _, ...listener } = p;
+                                onObserve(listener);
+                              }}
+                            >
+                              Observe
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

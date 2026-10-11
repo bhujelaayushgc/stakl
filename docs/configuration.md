@@ -4,6 +4,26 @@
 
 Paths resolve relative to the configuration directory, except Compose env files, app env files, and PID files, which resolve relative to the app's working directory. `~/` expands the current home directory. Environment interpolation in YAML is intentionally not performed: literal values stay literal. `$VARIABLE` expansion belongs in an explicitly enabled shell command.
 
+## Add and edit apps in the dashboard
+
+On **Applications**, choose **Add app** to configure a local service through a form. Select Process for an executable with separate arguments, Shell for shell syntax, Docker Compose for a Compose file, or Custom for a service controlled by your own commands. Enter a display name, working directory, and start command or Compose file. The app ID is generated from the name; you can change it before adding the app.
+
+To discover projects instead, choose **Discover apps**, use **Browse** to select a directory or enter its path, then scan and select **Review & add**. Browse lists folders on the machine running the Stakl controller, including when you open its dashboard from another computer. Home, Root, and Up navigate that host's filesystem; access follows the controller user's permissions. The same app form opens with the detected settings filled in. Review the command before saving; discovery identifies project files, not necessarily the correct entry point.
+
+Browse focuses its filter each time you enter a directory. Type to filter the current listing, use the arrow keys to highlight a folder, and press Enter to open it. Ctrl/Cmd+Enter selects the current directory. `/`, `~/`, and `../` navigate to root, home, and the parent; Alt+Up also goes to the parent. You can paste a directory path to navigate directly.
+
+The **Group** selector lets you choose an existing group, leave the app ungrouped, or **Create group...**. A new group and its app assignment are saved together. Canceling the editor saves neither.
+
+Expand the sections below the common settings for command arguments and shutdown, Compose options, environment variables/files, health and detection checks, dependencies, autostart/restart behavior, links, ports, tags, and notifications. Each argument has its own row, so an argument containing spaces stays one argument. Blank optional settings and **Default** choices use the configuration defaults. Durations accept Go syntax such as `500ms`, `5s`, and `1m`. Environment values are visible while editing and stored in the local configuration file.
+
+For an existing local app, open its details, select **Configuration**, and choose **Edit app**. Use the same form to change settings or move the app to another group. Existing IDs stay fixed to preserve dependencies, profiles, and history. Edit connected-host apps on their own controller.
+
+Service rows provide quick port links, and **Connections** in Overview and Configuration shows the host/IP and port. Running Docker Compose projects use published host ports; local processes use detected listeners or declared ports. Configured web links retain their scheme and path, and HTTP health checks supply the scheme for a link to the service root. Unconfirmed TCP ports offer **Try HTTP** (HTTPS on port 443); databases and other non-web services still show their connection address, and UDP ports have no browser action. Generated links are unavailable for stopped or stale services. Peer loopback ports are labeled for that host instead of linking to the browser's own machine. Reachability from the browser is not tested.
+
+The **Form** and **YAML** buttons switch between controls and the YAML for this app. Invalid YAML must be corrected before returning to the form or saving. Apps using anchors, aliases, or merges are directed to the full **Configuration** editor so their source relationships stay intact.
+
+Saving validates the complete configuration, creates a backup, and reloads it. It does not start or restart a service. Updated command and environment settings take effect on the next start or restart; a running service keeps its current process settings. Navigation and Cancel ask before discarding an edited draft. If the file changed since the editor opened, saving retains your draft and offers **Reload configuration**; accepting reload discards the draft and loads the current file.
+
 ## Global configuration
 
 ```yaml
@@ -14,6 +34,9 @@ server:
   open_browser: true
   # Required if host is not loopback. Use at least 32 random characters.
   # token: ...
+  # Set both to enable native HTTPS; paths are relative to this config directory.
+  # tls_cert_file: tls-cert.pem
+  # tls_key_file: tls-key.pem
 
 defaults:
   stop_timeout: 10s
@@ -48,6 +71,85 @@ Groups only organize the dashboard. Profile memberships cross group boundaries. 
 
 All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations are rejected. Zero values select the documented default where applicable.
 
+## HTTPS and headless peers
+
+### Enable access from the dashboard
+
+Each machine runs its own Stakl controller and dashboard. To let another dashboard connect here:
+
+1. Start Stakl normally and open **Hosts > Access from other machines**.
+2. Select this machine's LAN or VPN IP address and a free peer port (49153 by default), then select **Enable access**. Stakl generates a self-signed certificate and opens a separate HTTPS endpoint for scoped peer connections. The local dashboard, CLI, and services keep running.
+3. Under **Local peer access**, issue a named **Read** or **Control** grant. Read includes service details, status, health, history, and logs. Control adds per-app start, stop, and restart. Copy the token immediately; it is shown once.
+4. On the connecting machine's dashboard, use **Hosts > Add host**. Enter a display name, the copied HTTPS endpoint, the grant token, and the public certificate in **Trusted CA PEM**. These details are available together in the grant dialog when the peer endpoint is running.
+
+The endpoint is this machine's reachable address and peer port, for example `https://192.168.1.20:49153`. The two machines must have network connectivity, and the selected port must be allowed by your firewall. Stakl does not change firewall or router settings. Use a LAN or VPN address; the setup excludes loopback, wildcard, multicast, and link-local addresses.
+
+This setup does not require editing YAML or creating an administration token. The additional endpoint serves only scoped peer operations, not the dashboard, configuration editor, or grant administration. Certificates are verified by the connecting Stakl controller; you do not need to install this certificate in your browser.
+
+Settings and generated certificate/private-key material are saved in mode-0600 `peer-access.json` beside `instance.json` and restored on controller startup. Keep this file private and back it up separately; `stakl backup` does not include it. Do not copy it to provision another host. Only the public certificate is shown in Hosts. The certificate lasts one year. If it expires or a new address is not covered by its SANs, disable the endpoint and explicitly select **Replace saved certificate** when enabling again, then update the saved certificate trust on connecting dashboards. Stakl never silently replaces an existing certificate.
+
+**Disable access** closes this peer endpoint and its active connections without stopping services or deleting grants. Re-enabling reuses a valid saved certificate. Disable before changing the address or port. If the endpoint cannot start after a restart, Hosts shows the error while the local dashboard remains available.
+
+If you separately configured network HTTPS on the primary listener, disabling this additional endpoint leaves that route of access available. Revoke a grant to withdraw its permissions on every listener. Connections are one-way; connecting both directions requires issuing a grant and adding a host on each machine.
+
+### Manually configure the primary HTTPS listener
+
+Create a certificate without starting a controller:
+
+```sh
+stakl --config /path/to/config.yml tls init --host peer.example
+```
+
+Use the DNS name or IP address that other machines will connect to. This creates `tls-cert.pem` and `tls-key.pem` beside the configuration with private file permissions. The self-signed ECDSA certificate lasts one year and includes `localhost`, `127.0.0.1`, `::1`, and the supplied host as SANs. Existing files, including partial pairs, are preserved.
+
+Configure the pair and a strong full administration token for remote binding:
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 49152
+  open_browser: false
+  token: REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS
+  tls_cert_file: tls-cert.pem
+  tls_key_file: tls-key.pem
+```
+
+Start with `stakl --config /path/to/config.yml --no-browser`. Local CLI commands automatically trust the configured public certificate and verify its SAN. Custom DNS-only certificates also work on IP or wildcard listeners: the CLI verifies a certificate DNS identity while keeping the connection pinned to the configured listener IP, without resolving or routing administration traffic to that DNS name. Server binding, token, and TLS setting changes require a controller restart; replacing certificate files also requires restarting to load them.
+
+Issue a scoped credential from the running controller:
+
+```sh
+stakl peer tokens create --name Laptop                  # read access by default
+stakl peer tokens create --name Laptop --access control # per-app start/stop/restart
+stakl peer tokens list
+stakl peer tokens revoke GRANT_ID
+```
+
+Creation prints metadata and the token once. Lists contain only metadata. Transfer the **public `tls-cert.pem`** to the connecting machine as its trusted PEM, together with the scoped token and `https://peer.example:49152` endpoint. Certificate chains and DNS/IP SANs must verify; there is no insecure TLS option. A headless peer does not require its certificate to be installed in the hub browser. `stakl open` opens the local HTTPS dashboard; the generated certificate includes its local IP SAN, and using that self-signed certificate in a browser requires trusting the public certificate there. For a custom DNS-only certificate, browser access instead needs a certificate-covered hostname that maps to the listener. The local CLI's separate TLS identity does not change browser certificate verification.
+
+Keep `tls-key.pem` on the peer and back it up separately; `stakl backup` does not include TLS files. State database backups retain controller identity and peer credentials. Do not copy a state database to create a second independent controller.
+
+### Connecting from a dashboard
+
+1. On the peer, enable access in **Hosts > Access from other machines** as above. Alternatively configure native HTTPS manually, or keep its HTTP listener on loopback and establish the tunnel below.
+2. In the peer dashboard's **Hosts > Local peer access**, issue a named grant. Read includes details, history, health, and logs. Control adds only per-app start, stop, and restart. Alternatively use the `peer tokens` CLI commands above with the peer's `--config` path.
+3. Copy the one-time token. In the hub dashboard, open **Hosts > Add host**. Enter a display name, the endpoint (for example `https://peer.example:49152`), the peer token, and the public certificate PEM if needed. Connection requires a successful identity handshake.
+4. Select the host or **All hosts** in Applications. Open a row to inspect that host's tabs. Remote configuration is redacted and read-only. A remote `localhost` link is labeled with its host instead of opening on your computer; remote ports are observations, not browser reachability checks.
+
+For an SSH tunnel, leave the peer listening at `127.0.0.1:49152` and run this on the machine running the hub:
+
+```sh
+ssh -N -L 127.0.0.1:49160:127.0.0.1:49152 user@peer.example
+```
+
+Register `http://127.0.0.1:49160` on the hub using a scoped peer token. Keep the tunnel running yourself. HTTP is accepted only for verified loopback destinations; direct LAN HTTP is rejected. Stakl does not create or manage tunnels.
+
+Use **Edit** to rename a connection or explicitly replace its endpoint, token, or certificate trust. Saved tokens are never returned to the browser. Leaving the token blank retains it. Select certificate replacement with an empty PEM to return to system certificate roots. **Reconnect** immediately verifies the peer again. **Remove** forgets the connection and cached snapshot without stopping services or revoking the peer grant. Revoke that grant on the issuing peer when access is no longer wanted; active log streams close, but an already accepted action can still finish.
+
+Connection states distinguish unavailable, unauthorized, incompatible protocol, and changed controller identity. Cached rows are marked stale and cannot be controlled. The controller connection indicator describes browser-to-hub connectivity separately. If an action reports **Outcome unknown**, inspect refreshed state and history before deciding whether to act again. Stakl never automatically retries a lifecycle action.
+
+Keep the state directory and its backups private. The mode-0600 database contains recoverable outbound connection credentials, hashed issued tokens, and the persistent controller identity. Backups preserve these; TLS private keys need separate backup. Copying this database to another independent host duplicates its identity and is not a way to provision a new peer.
+
 ## App fields
 
 | Field | Meaning / default |
@@ -56,9 +158,9 @@ All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations a
 | `name` | Display name, defaults to ID; must be unique |
 | `description` | Short row description |
 | `group` | Optional existing group ID |
-| `type` | `process` (default), `shell`, `docker-compose`, `custom` |
+| `type` | `process` (default), `shell`, `docker-compose`, `custom`, `external` (observation only) |
 | `cwd` | Existing working directory; defaults to config directory |
-| `start` | Required command for non-Compose apps |
+| `start` | Required for process, shell, and custom apps; unavailable for observation-only apps |
 | `stop` | Signal, timeout, and optional custom command |
 | `restart_command` | Custom runner restart command; otherwise stop + start |
 | `status` | Custom runner command: exit 0 means running |
@@ -69,7 +171,7 @@ All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations a
 | `depends_on` | List of IDs or map of ID to condition |
 | `autostart` | Boolean or `{enabled: true, delay: 5s}` |
 | `health` | Optional periodic health check |
-| `detect` | Optional external-availability check |
+| `detect` | External-availability check; required for observation-only apps |
 | `ports` | List of `{name, port}`; warns/refuses duplicate start if occupied |
 | `links` | Named absolute HTTP(S) URLs |
 | `restart` | Bounded restart policy |
@@ -78,6 +180,35 @@ All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations a
 | `tags`, `icon`, `favorite`, `notes` | Optional metadata; type determines default UI icon |
 
 Browser favorites can override initial `favorite` values locally. `icon` accepts terminal, box, server, activity, layers, code, folder, or heart; unknown/omitted values use the runner type icon. New configuration takes effect for the next launch. Active workloads keep the launch-time cwd, environment, stop settings and runner identity, so a config edit cannot retarget a stop action.
+
+## Gradual adoption of existing services
+
+Use **Observation only** to bring an existing service into the dashboard while keeping its current process manager.
+
+1. Open **Ports** and select **Observe** beside an unassociated TCP listener. Stakl fills in a TCP detection target and port; wildcard addresses become a local loopback target. It rechecks the listener and tries to fill its working directory from the process metadata. If the published port identifies an accessible, unambiguous Compose project, Stakl fills its working directory, Compose file, and existing project name and uses Docker detection instead.
+2. Review the name and detection address. Select a group or create one in the same form. Add health checks, links, notes, or dependencies as needed.
+3. Select **Add app**. Stakl periodically checks availability and displays **Running externally** when detected. Saving never launches or takes ownership of the service.
+
+For Compose projects, scan their directory through **Discover apps** and select **Observe existing**. Stakl inspects running containers' Compose labels and tries to fill the working directory, Compose file, and actual project name. The app ID can differ from the existing Docker project name. Autofill requires one matching project, a single Compose file, and paths accessible on this host. If inspection fails, paths are unavailable, or several projects or files match, a warning explains why you need to review the settings manually. You can find the existing **Project name** with `docker compose ls`. Stakl uses read-only `docker compose ps` inspection for ongoing availability and can show containers and published ports. Docker inspection failures produce unknown state.
+
+You can also use **Add app**, choose **Observation only**, and configure detection manually. UDP listeners need an explicit process-name, PID-file, or command check; a TCP probe cannot verify a UDP service. Process checks require a name, including health checks for observation-only entries. Use non-mutating commands for checks.
+
+```yaml
+apps:
+  existing-api:
+    name: Existing API
+    type: external
+    group: development
+    detect: {type: tcp, host: 127.0.0.1, port: 8000}
+    health: {type: http, url: 'http://127.0.0.1:8000/health'}
+    links: {API: 'http://127.0.0.1:8000'}
+```
+
+Detection proves that the configured endpoint or check is available. It does not verify that a listener still belongs to the originally discovered process; a replacement service on the same port can satisfy the check. Discovered PIDs are never persisted as ownership credentials. If detection fails, the entry displays **Stopped**, meaning not detected by its check.
+
+Observation-only entries cannot configure launch/control commands, autostart, automatic restarts, or shutdown cleanup. Start, stop, restart, and force-kill requests are refused by the backend. Global and profile operations skip direct control of these entries; managed apps can still depend on their `running` or `healthy` condition. An unavailable observed dependency blocks its dependents without starting the external service. Logs remain with the existing service manager.
+
+Observation settings can be edited or removed while the external service keeps running. To move into managed operation, explicitly change the app type and configure its supported runner; arrange the handoff from the existing manager yourself. A Stakl-owned workload must be stopped before changing to observation-only mode. Connected dashboards can view observations through the existing host connection; discovery and configuration editing happen on the service's own host.
 
 ## Commands and environment
 

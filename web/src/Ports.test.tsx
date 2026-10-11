@@ -1,7 +1,43 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, it } from "vitest";
+import { expect, it, vi, afterEach } from "vitest";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { PortsPage } from "./Ports";
 import type { App, PortScan } from "./types";
+
+afterEach(cleanup);
+it("reviews an unassociated TCP listener without offering unsupported UDP adoption", () => {
+  document.body.innerHTML = "";
+  const listener = {
+    port: 5432,
+    protocol: "TCP" as const,
+    address: "*",
+    pid: 43,
+    pgid: 43,
+    process: "postgres",
+  };
+  const onObserve = vi.fn();
+  render(
+    <PortsPage
+      apps={[]}
+      scan={{
+        scanned_at: "2026-10-06T00:00:00Z",
+        warning: "",
+        ports: [listener, { ...listener, port: 5353, protocol: "UDP" }],
+      }}
+      error=""
+      loading={false}
+      refresh={async () => {}}
+      onObserve={onObserve}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Observe TCP port 5432" }),
+  );
+  expect(onObserve).toHaveBeenCalledWith(listener);
+  expect(
+    screen.getByRole("button", { name: "Observe UDP port 5353" }),
+  ).toBeDisabled();
+});
 
 it("lists configured and observed Stakl ports before other listeners", () => {
   const app = {

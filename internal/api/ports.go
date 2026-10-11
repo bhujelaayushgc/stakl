@@ -17,6 +17,7 @@ type listeningPort struct {
 	Port     int    `json:"port"`
 	Protocol string `json:"protocol"`
 	Address  string `json:"address"`
+	Family   string `json:"family,omitempty"`
 	PID      int    `json:"pid"`
 	PGID     int    `json:"pgid"`
 	Process  string `json:"process"`
@@ -28,7 +29,7 @@ func (s *Server) ports(w http.ResponseWriter, r *http.Request) {
 	ports := []listeningPort{}
 	warnings := []string{}
 	for _, protocol := range []string{"TCP", "UDP"} {
-		args := []string{"-nP", "-i" + protocol, "-Fpcgn"}
+		args := []string{"-nP", "-i" + protocol, "-Fpcgnt"}
 		if protocol == "TCP" {
 			args = append(args, "-sTCP:LISTEN")
 		}
@@ -59,7 +60,10 @@ func (s *Server) ports(w http.ResponseWriter, r *http.Request) {
 		if a.PID != b.PID {
 			return a.PID < b.PID
 		}
-		return a.Address < b.Address
+		if a.Address != b.Address {
+			return a.Address < b.Address
+		}
+		return a.Family < b.Family
 	})
 	JSON(w, map[string]any{"ports": ports, "scanned_at": time.Now(), "warning": strings.Join(warnings, "\n")})
 }
@@ -81,6 +85,12 @@ func parseListeningPorts(output, protocol string) []listeningPort {
 			process.PGID, _ = strconv.Atoi(value)
 		case 'c':
 			process.Process = value
+		case 'f':
+			process.Family = ""
+		case 't':
+			if value == "IPv4" || value == "IPv6" {
+				process.Family = value
+			}
 		case 'n':
 			// Connected UDP sockets also reserve their local endpoint.
 			local, _, _ := strings.Cut(value, "->")
