@@ -80,7 +80,9 @@ test("connected hosts isolate equal IDs, permissions, routes, logs and responsiv
       new RegExp(`host=all.*app=ticker.*app_host=${hostID}`),
     );
     await expect(
-      page.getByText("loopback on Browser peer", { exact: false }),
+      page
+        .locator(".detail-actions")
+        .getByText("loopback on Browser peer", { exact: false }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: "Peer", exact: true }),

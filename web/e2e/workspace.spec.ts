@@ -31,11 +31,11 @@ test("Discover Apps browses directories on the controller host", async ({
     picker.getByRole("button", { name: "Select this folder" }),
   ).toBeEnabled();
   await picker
-    .getByRole("button", { name: "Open folder api", exact: true })
+    .getByRole("option", { name: "Open folder api", exact: true })
     .click();
   await picker.getByRole("button", { name: "Up one level" }).click();
   await picker
-    .getByRole("button", { name: "Open folder api", exact: true })
+    .getByRole("option", { name: "Open folder api", exact: true })
     .click();
   await picker.getByRole("button", { name: "Select this folder" }).click();
   await expect(picker).not.toBeVisible();
