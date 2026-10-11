@@ -4,7 +4,7 @@ Thanks for improving Stakl. Keep changes focused, preserve the process-ownership
 
 ## Setup
 
-Use Go 1.26 or newer and Node.js 22 or newer.
+Use Go 1.26.9 or newer and Node.js 22 or newer. CI reads the Go version from `go.mod` so tests and release binaries use the same patched toolchain.
 
 ```sh
 make build test lint
@@ -33,5 +33,7 @@ Review all four images before committing. Desktop Applications captures omit emp
 - Update documentation when behavior or configuration changes.
 - Do not commit generated `bin/`, `dist/`, or `web/dist/` output.
 - Keep unrelated formatting and refactors out of the change.
+
+See [the release process](docs/releases.md) for stable releases, beta tags, release notes, and artifact verification.
 
 By contributing, you agree that your contribution is licensed under the MIT License.

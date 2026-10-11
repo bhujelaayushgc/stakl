@@ -39,7 +39,7 @@ Beta releases from `dev` are GitHub prereleases and are excluded from the defaul
 curl -fsSL https://github.com/bhujelaayushgc/stakl/releases/latest/download/install.sh | STAKL_VERSION=v0.2.0-beta.1 sh
 ```
 
-Release tags use `vX.Y.Z` for stable releases and `vX.Y.Z-beta.N` for betas (`N` starts at 1). Create the tag at the intended commit and push the tag to publish after CI passes. The workflow verifies that a stable commit is included in `main`, or a beta commit in `dev`, and always builds the tagged commit. Normal branch pushes produce CI artifacts without publishing a release.
+Release tags use `vX.Y.Z` for stable releases and `vX.Y.Z-beta.N` for betas (`N` starts at 1). The workflow verifies that a stable commit is included in `main`, or a beta commit in `dev`, and always builds the tagged commit. After CI passes, stable tags create a draft GitHub release with checksummed binaries and the installer. Review its detailed release notes and explicitly publish it to make it available to users. Beta tags publish prereleases automatically. Normal branch pushes produce CI artifacts without publishing a release. See [the release process](docs/releases.md).
 
 The installer never starts Stakl or changes `~/.stakl`. To uninstall the executable, remove `~/.local/bin/stakl`; configuration and runtime history remain intact.
 
@@ -55,7 +55,7 @@ Linux users can replace `shasum -a 256` with `sha256sum`. Release binaries are n
 
 ## Build and run
 
-Requires Go 1.26+ and Node.js 22+ **to build**. The resulting executable needs neither Node.js nor Go. Docker is optional.
+Requires Go 1.26.9+ and Node.js 22+ **to build**. The resulting executable needs neither Node.js nor Go. Docker is optional.
 
 ```sh
 make build
@@ -135,7 +135,7 @@ The dashboard uses a compact workstation layout with a neutral navigation rail, 
 - Optional YAML editor with highlighting, validation, conflict detection, backups, and reload. Raw YAML is concealed until explicitly revealed.
 - Discovery suggestions require review and never start automatically. Global Stop All requires confirmation.
 - Gradual adoption: **Observe** an existing TCP listener from Ports, or **Observe existing** on a discovered Compose project. Review its name, detection, checks, links, and group through forms. Observation-only entries keep lifecycle control and logs with their existing manager. See [the adoption guide](docs/configuration.md#gradual-adoption-of-existing-services).
-- Open a service's **More info** menu item (or click its name) for the project path and configured/detected ports. Running Compose services use Docker's published host ports automatically; no `ports` configuration is needed for detection. The Ports page lists local TCP listeners, UDP bindings and Docker-published ports, including processes outside Stakl, and refreshes every 15 seconds while open. Local socket inspection uses `lsof` (included on macOS; install it on Linux) and is limited to processes visible to your user. An absent listener is not a guarantee that a port is available.
+- Service rows show configured/detected ports and browser shortcuts. Open a service's details for **Connections** in Overview and Configuration, including host/IP, port, and connection status. Configured links and HTTP health checks provide known web URLs; other occupied TCP ports offer **Try HTTP** (HTTPS on port 443), which may not serve a web application. Running Compose services use Docker's published host ports automatically; no `ports` configuration is needed for detection. Local port inspection refreshes every 15 seconds while viewing running local applications or Ports. The Ports page also lists local listeners outside Stakl. Inspection uses `lsof` (included on macOS; install it on Linux) and is limited to processes visible to your user. An absent listener is not a guarantee that a port is available.
 
 <details>
 <summary>Live logs</summary>

@@ -10,11 +10,15 @@ On **Applications**, choose **Add app** to configure a local service through a f
 
 To discover projects instead, choose **Discover apps**, use **Browse** to select a directory or enter its path, then scan and select **Review & add**. Browse lists folders on the machine running the Stakl controller, including when you open its dashboard from another computer. Home, Root, and Up navigate that host's filesystem; access follows the controller user's permissions. The same app form opens with the detected settings filled in. Review the command before saving; discovery identifies project files, not necessarily the correct entry point.
 
+Browse focuses its filter each time you enter a directory. Type to filter the current listing, use the arrow keys to highlight a folder, and press Enter to open it. Ctrl/Cmd+Enter selects the current directory. `/`, `~/`, and `../` navigate to root, home, and the parent; Alt+Up also goes to the parent. You can paste a directory path to navigate directly.
+
 The **Group** selector lets you choose an existing group, leave the app ungrouped, or **Create group...**. A new group and its app assignment are saved together. Canceling the editor saves neither.
 
 Expand the sections below the common settings for command arguments and shutdown, Compose options, environment variables/files, health and detection checks, dependencies, autostart/restart behavior, links, ports, tags, and notifications. Each argument has its own row, so an argument containing spaces stays one argument. Blank optional settings and **Default** choices use the configuration defaults. Durations accept Go syntax such as `500ms`, `5s`, and `1m`. Environment values are visible while editing and stored in the local configuration file.
 
 For an existing local app, open its details, select **Configuration**, and choose **Edit app**. Use the same form to change settings or move the app to another group. Existing IDs stay fixed to preserve dependencies, profiles, and history. Edit connected-host apps on their own controller.
+
+Service rows provide quick port links, and **Connections** in Overview and Configuration shows the host/IP and port. Running Docker Compose projects use published host ports; local processes use detected listeners or declared ports. Configured web links retain their scheme and path, and HTTP health checks supply the scheme for a link to the service root. Unconfirmed TCP ports offer **Try HTTP** (HTTPS on port 443); databases and other non-web services still show their connection address, and UDP ports have no browser action. Generated links are unavailable for stopped or stale services. Peer loopback ports are labeled for that host instead of linking to the browser's own machine. Reachability from the browser is not tested.
 
 The **Form** and **YAML** buttons switch between controls and the YAML for this app. Invalid YAML must be corrected before returning to the form or saving. Apps using anchors, aliases, or merges are directed to the full **Configuration** editor so their source relationships stay intact.
 
