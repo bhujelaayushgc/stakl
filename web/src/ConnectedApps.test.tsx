@@ -87,6 +87,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 import { AppShell, HealthHistory } from "./main";
@@ -241,4 +242,79 @@ it("isolates equal-ID busy state, pins, URLs and remote action paths", async () 
   finish(
     new Response(JSON.stringify({ host: peer.host, data: { api: "ok" } })),
   );
+});
+
+it("offers detected connections from the ledger and keeps them accessible in Configuration", async () => {
+  const full = {
+    ...app(),
+    config: {
+      ...app().config,
+      description: "",
+      type: "process",
+      cwd: "/srv/api",
+      autostart: { enabled: false },
+      favorite: false,
+      health: { type: "http", url: "http://127.0.0.1:3000/health" },
+      start: { command: "node server.js" },
+      stop: {},
+      links: {},
+      docker: { compose_file: "", project_name: "" },
+      depends_on: {},
+      detect: { type: "" },
+      notes: "",
+      env: {},
+    },
+    runtime: {
+      ...app().runtime,
+      owned: true,
+      health: "healthy",
+      started: "",
+      restart_count: 0,
+      launch: "",
+    },
+  } as HostedApp;
+  const data: Record<string, unknown> = {
+    "/api/apps": [full],
+    "/api/config": {
+      path: "/srv/stakl.yml",
+      groups: { dev: { name: "Dev", order: 1 } },
+      profiles: {},
+    },
+    "/api/hosts/apps": [{ host, apps: [full], groups: {} }],
+    "/api/system/ports": {
+      scanned_at: "2026-10-11T00:00:00Z",
+      warning: "",
+      ports: [
+        {
+          port: 3000,
+          protocol: "TCP",
+          address: "*",
+          pid: 13,
+          pgid: 12,
+          process: "node",
+        },
+      ],
+    },
+    "/api/hosts/local/apps/api": { host, data: full },
+  };
+  vi.stubGlobal("fetch", async (path: string) => {
+    if (!(path in data)) throw new Error(`Unexpected request: ${path}`);
+    return new Response(JSON.stringify(data[path]));
+  });
+  render(<AppShell />);
+  const row = await screen.findByRole("group", { name: "API application" });
+  expect(
+    await within(row).findByRole("link", {
+      name: "Open API at localhost:3000",
+    }),
+  ).toHaveAttribute("href", "http://localhost:3000/");
+  fireEvent.click(within(row).getByRole("button", { name: "API" }));
+  const panel = await screen.findByRole("tabpanel");
+  expect(
+    within(panel).getByRole("link", { name: "Open HTTP at localhost:3000" }),
+  ).toHaveAttribute("href", "http://localhost:3000/");
+  fireEvent.click(screen.getByRole("tab", { name: "Configuration" }));
+  expect(
+    within(panel).getByRole("link", { name: "Open HTTP at localhost:3000" }),
+  ).toHaveAttribute("href", "http://localhost:3000/");
 });

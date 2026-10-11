@@ -62,6 +62,7 @@ import {
   Event,
   Health,
   LogLine,
+  ListeningPort,
   Profile,
   Status,
   elapsed,
@@ -71,7 +72,6 @@ import {
   profileState,
   request,
   typeLabel,
-  servicePorts,
 } from "./types";
 import { PortsPage, usePortScan } from "./Ports";
 import { HostsPage } from "./HostsPage";
@@ -85,6 +85,7 @@ import {
   identity,
   isLiveApp,
   remoteLoopback,
+  serviceConnections,
   scopedGroups,
 } from "./hosts";
 import {
@@ -355,7 +356,13 @@ export function AppShell() {
     (a) => scope === "all" || (a.host?.id || "local") === scope,
   );
   const ports = usePortScan(
-    page === "ports" || (!!selected && appHost === "local"),
+    page === "ports" ||
+      (!!selected && appHost === "local") ||
+      (page === "dashboard" &&
+        apps.some(
+          (a) =>
+            (!a.host || a.host.id === "local") && isActive(a.runtime.state),
+        )),
   );
   const hostReads = useRef<AbortController | null>(null);
   const refreshHosts = useCallback(async () => {
@@ -1344,6 +1351,7 @@ export function AppShell() {
                                 <AppRow
                                   key={identity(a)}
                                   app={a}
+                                  listeners={ports.scan?.ports || []}
                                   localControls={scope === "local"}
                                   busy={busy.has(identity(a))}
                                   pinned={pinned.has(identity(a))}
@@ -1643,6 +1651,7 @@ function ProfileCard({
 }
 function AppRow({
   app: a,
+  listeners,
   localControls,
   busy,
   pinned,
@@ -1651,6 +1660,7 @@ function AppRow({
   onOpen,
 }: {
   app: App;
+  listeners: ListeningPort[];
   localControls: boolean;
   busy: boolean;
   pinned: boolean;
@@ -1664,7 +1674,15 @@ function AppRow({
   const blocked = !canControlApp(a);
   const active = isActive(a.runtime.state),
     canStop = canStopApp(a);
-  const link = Object.values(a.config.links || {})[0];
+  const config = active ? a.effective_config || a.config : a.config;
+  const link = Object.values(config.links || {}).find(
+    (url) => !remoteLoopback(a, url),
+  );
+  const connections = serviceConnections(
+    a,
+    listeners,
+    window.location.hostname,
+  );
   return (
     <div
       className="app-row workstation-list-row workstation-ledger-grid"
@@ -1692,6 +1710,52 @@ function AppRow({
               <span className="autostart">Autostart</span>
             )}
           </span>
+          <div className="app-connections">
+            {link &&
+              active &&
+              isLiveApp(a) &&
+              !remoteLoopback(a, link) &&
+              !connections.some((p) => p.url === link) && (
+                <a
+                  href={link}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open ${a.config.name}`}
+                >
+                  Open app <ArrowUpRight size={12} aria-hidden="true" />
+                </a>
+              )}
+            {connections.slice(0, 3).map((p) =>
+              p.url ? (
+                <a
+                  key={`${p.protocol}:${p.address}`}
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`${p.inferred ? "Try" : "Open"} ${a.config.name} at ${p.address}`}
+                  title={`${p.inferred ? "Try" : "Open"} ${p.url.startsWith("https:") ? "HTTPS" : "HTTP"}: ${p.url}`}
+                >
+                  :{p.port} <ArrowUpRight size={12} aria-hidden="true" />
+                </a>
+              ) : (
+                <span
+                  key={`${p.protocol}:${p.address}`}
+                  title={`${p.protocol} ${p.address}${p.localOnly ? ` · Loopback on ${a.host?.name || "the controller"}` : ""}`}
+                >
+                  :{p.port}
+                  {p.protocol === "UDP" ? " UDP" : ""}
+                </span>
+              ),
+            )}
+            {connections.length > 3 && (
+              <button
+                onClick={() => onOpen()}
+                aria-label={`Show all connections for ${a.config.name}`}
+              >
+                +{connections.length - 3} more
+              </button>
+            )}
+          </div>
         </div>
       </div>
       <div>
@@ -1828,7 +1892,12 @@ function Detail({
     dispatch(id, action, false, a.host?.id || "local");
   const blocked = !canControlApp(a);
   const active = isActive(a.runtime.state);
-  const portList = servicePorts(a, remote ? [] : portScan.scan?.ports || []);
+  const config = active ? a.effective_config || a.config : a.config;
+  const connections = serviceConnections(
+    a,
+    portScan.scan?.ports || [],
+    window.location.hostname,
+  );
   const canStop = canStopApp(a);
   return (
     <>
@@ -1879,7 +1948,7 @@ function Detail({
             </button>
           </>
         )}
-        {Object.entries(a.config.links || {}).map(([name, url]) =>
+        {Object.entries(config.links || {}).map(([name, url]) =>
           remoteLoopback(a, url) ? (
             <span className="remote-link" key={name}>
               {name}: {url} (loopback on {a.host?.name})
@@ -1951,6 +2020,94 @@ function Detail({
             <AlertCircle size={17} aria-hidden="true" />
             <pre>{a.runtime.error}</pre>
           </div>
+        )}
+        {(tab === "Overview" || tab === "Configuration") && (
+          <section aria-label="Service connections">
+            <h3>Connections</h3>
+            {!remote && portScan.error && (
+              <p className="alert error" role="alert">
+                {portScan.error}
+              </p>
+            )}
+            {!remote && portScan.scan?.warning && (
+              <p className="muted">
+                Some ports may be missing: {portScan.scan.warning}
+              </p>
+            )}
+            <div className="port-list service-connections">
+              {connections.map((p) => {
+                const scheme = p.url?.startsWith("https:") ? "HTTPS" : "HTTP";
+                return (
+                  <div key={`${p.protocol}:${p.address}`}>
+                    <span>{p.protocol}</span>
+                    <code>{p.address}</code>
+                    <span
+                      className={`status ${p.occupied ? "status-running" : "status-stopped"}`}
+                    >
+                      <span className="status-dot" />
+                      {p.occupied ? "Occupied" : "Not detected"}
+                    </span>
+                    {p.url && (
+                      <a
+                        className="button small"
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`${p.inferred ? "Try" : "Open"} ${scheme} at ${p.address}`}
+                        title={p.url}
+                      >
+                        {p.inferred ? "Try" : "Open"} {scheme}
+                        <ArrowUpRight size={13} aria-hidden="true" />
+                      </a>
+                    )}
+                    {p.localOnly && (
+                      <small className="muted">
+                        Loopback on {a.host?.name || "the controller"}
+                      </small>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {connections.length === 0 && (
+              <p className="muted">
+                {remote
+                  ? "No ports declared in the peer snapshot."
+                  : !active
+                    ? "No ports configured. Stopped services have no live ports to detect."
+                    : !portScan.scan && !portScan.error
+                      ? "Detecting ports…"
+                      : "No ports associated with this service. For externally managed services, declare ports in the application configuration."}
+              </p>
+            )}
+            {connections.some((p) => p.url && p.inferred) && (
+              <p className="muted">
+                Try opens the port in your browser. TCP ports may serve
+                databases or other non-web protocols. Configure a link for a
+                specific URL or HTTPS.
+              </p>
+            )}
+            {remote && (
+              <p className="muted">
+                Ports observed on {a.host?.name}. Browser reachability is not
+                checked.
+              </p>
+            )}
+            {!remote && (
+              <button
+                className="button small"
+                disabled={portScan.loading}
+                onClick={portScan.refresh}
+              >
+                <RefreshCw
+                  size={14}
+                  className={portScan.loading ? "spin" : ""}
+                  aria-hidden="true"
+                />
+                {portScan.loading ? "Scanning…" : "Refresh ports"}
+              </button>
+            )}
+          </section>
         )}
         {tab === "Overview" && (
           <>
@@ -2026,62 +2183,6 @@ function Detail({
                   ))}
                 </div>
               </>
-            )}
-            <h3>Ports</h3>
-            {!remote && portScan.error && (
-              <p className="alert error" role="alert">
-                {portScan.error}
-              </p>
-            )}
-            {!remote && portScan.scan?.warning && (
-              <p className="muted">
-                Some ports may be missing: {portScan.scan.warning}
-              </p>
-            )}
-            <div className="port-list">
-              {portList.map((p) => (
-                <div key={`${p.protocol}:${p.port}`}>
-                  <span>{p.protocol}</span>
-                  <code>:{p.port}</code>
-                  <span
-                    className={`status ${p.occupied ? "status-running" : "status-stopped"}`}
-                  >
-                    <span className="status-dot" />
-                    {p.occupied ? "Occupied" : "Not detected"}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {portList.length === 0 && (
-              <p className="muted">
-                {remote
-                  ? "No ports declared in the peer snapshot."
-                  : !active
-                    ? "No ports configured. Stopped services have no live ports to detect."
-                    : !portScan.scan && !portScan.error
-                      ? "Detecting ports…"
-                      : "No ports associated with this service. For externally managed services, declare ports in the application configuration."}
-              </p>
-            )}
-            {remote && (
-              <p className="muted">
-                Ports observed on {a.host?.name}. Browser reachability is not
-                checked.
-              </p>
-            )}
-            {!remote && (
-              <button
-                className="button small"
-                disabled={portScan.loading}
-                onClick={portScan.refresh}
-              >
-                <RefreshCw
-                  size={14}
-                  className={portScan.loading ? "spin" : ""}
-                  aria-hidden="true"
-                />
-                {portScan.loading ? "Scanning…" : "Refresh ports"}
-              </button>
             )}
             {a.containers.length > 0 && (
               <>

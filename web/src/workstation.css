@@ -444,6 +444,52 @@
   font-size: 12px;
   line-height: 17px;
 }
+.app-connections {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 12px;
+  margin-top: 3px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 18px;
+}
+.app-connections:empty {
+  display: none;
+}
+.app-connections a,
+.app-connections button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 0;
+  color: var(--accent);
+}
+.app-connections a:hover,
+.app-connections button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.app-connections > span {
+  color: var(--muted);
+}
+.service-connections > div {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.service-connections code {
+  flex: 1 1 150px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--text);
+}
+.service-connections .status {
+  margin-left: 0;
+}
+.service-connections small {
+  flex-basis: 100%;
+}
 .overview-page .autostart {
   margin-left: 3px;
   border: 0;

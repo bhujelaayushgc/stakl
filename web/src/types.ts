@@ -17,7 +17,7 @@ export interface AppConfig {
   cwd: string;
   start: { command: string; args?: string[] };
   stop: { command?: string };
-  health: { type: string };
+  health: { type: string; url?: string };
   detect: { type: string; host?: string; port?: number };
   depends_on: Record<string, { condition: string }>;
   links: Record<string, string>;
