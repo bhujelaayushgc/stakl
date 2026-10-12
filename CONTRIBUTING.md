@@ -4,7 +4,7 @@ Thanks for improving Stakl. Keep changes focused, preserve the process-ownership
 
 ## Setup
 
-Use Go 1.26.9 or newer and Node.js 22 or newer. CI reads the Go version from `go.mod` so tests and release binaries use the same patched toolchain.
+Use Go 1.26.9 or newer and a Node.js version supported by the [build requirements](README.md#build-and-run). CI reads the Go version from `go.mod` so tests and release binaries use the same patched toolchain.
 
 ```sh
 make build test lint
