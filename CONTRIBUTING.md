@@ -19,13 +19,15 @@ The README uses screenshots of real disposable processes from the browser suite.
 
 ```sh
 make browser-test
-cp web/test-results/*/desktop-light.png docs/images/dashboard.png
-cp web/test-results/*/desktop-dark.png docs/images/dashboard-dark.png
-cp web/test-results/*/logs.png docs/images/logs.png
-cp web/test-results/*/mobile-overview.png docs/images/mobile.png
+cp web/test-results/showcase-*/showcase-dashboard-light.png docs/images/dashboard.png
+cp web/test-results/showcase-*/showcase-dashboard-dark.png docs/images/dashboard-dark.png
+cp web/test-results/showcase-*/showcase-logs.png docs/images/logs.png
+cp web/test-results/showcase-*/showcase-mobile.png docs/images/mobile.png
+cp web/test-results/showcase-*/showcase-hosts.png docs/images/hosts.png
+cp web/test-results/showcase-*/showcase-app-form.png docs/images/app-form.png
 ```
 
-Review all four images before committing. Desktop Applications captures omit empty space below the rows; logs and mobile captures show the full page. Use the isolated test workspace so personal paths, configuration, and credentials do not appear in repository media.
+Review all images before committing. Desktop Applications captures omit empty space below the rows; logs and mobile captures show the full page. Use the isolated test workspace so personal paths, configuration, and credentials do not appear in repository media.
 
 ## Pull requests
 
