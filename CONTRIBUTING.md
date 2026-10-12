@@ -29,6 +29,10 @@ Review all four images before committing. Desktop Applications captures omit emp
 
 ## Pull requests
 
+Open feature and maintenance pull requests against `dev`. Maintainers promote `dev` to `main` through release pull requests. Dependabot version updates also target `dev`; security updates target the default branch, `main`.
+
+GitHub Actions workflows use full commit SHAs with version comments. Keep these pins when updating Actions; Dependabot maintains the pinned references.
+
 - Explain the user-visible problem and the chosen fix.
 - Update documentation when behavior or configuration changes.
 - Do not commit generated `bin/`, `dist/`, or `web/dist/` output.
@@ -37,3 +41,7 @@ Review all four images before committing. Desktop Applications captures omit emp
 See [the release process](docs/releases.md) for stable releases, beta tags, release notes, and artifact verification.
 
 By contributing, you agree that your contribution is licensed under the MIT License.
+
+## Community and security
+
+Follow the [code of conduct](CODE_OF_CONDUCT.md) in all project spaces. Report abuse through [GitHub's private form](https://github.com/contact/report-abuse), and report security vulnerabilities using the separate process in [SECURITY.md](SECURITY.md).

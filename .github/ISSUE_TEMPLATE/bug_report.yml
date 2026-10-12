@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible problem with Stakl.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security vulnerabilities, use [private vulnerability reporting](https://github.com/bhujelaayushgc/stakl/security/advisories/new).
+        Remove credentials, tokens, private keys, and personal information from examples and logs.
+  - type: input
+    id: version
+    attributes:
+      label: Stakl version
+      description: Run stakl --version.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, and Docker/Compose version if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal example with sensitive information removed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant error messages or sanitized logs.
+    validations:
+      required: true
