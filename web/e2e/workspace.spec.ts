@@ -215,6 +215,8 @@ test("mobile drawer focus and unsaved configuration guard", async ({
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto(`${i.url}/?token=${i.token}`);
 
+  const toggle = page.getByRole("button", { name: "Toggle navigation" });
+  await expect(toggle).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(
     page.getByRole("link", { name: "Skip to main content" }),
@@ -225,7 +227,6 @@ test("mobile drawer focus and unsaved configuration guard", async ({
     ),
   ).toBe(true);
 
-  const toggle = page.getByRole("button", { name: "Toggle navigation" });
   await toggle.click();
   await expect(
     page.getByRole("navigation").getByRole("link", { name: /Applications/ }),
