@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/bhujelaayushgc/stakl/security/advisories/new
+    about: Use private reporting for undisclosed security vulnerabilities.
+  - name: Documentation
+    url: https://github.com/bhujelaayushgc/stakl/tree/main/docs
+    about: Read the configuration, process management, Docker, and API guides.
