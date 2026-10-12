@@ -81,3 +81,28 @@ func TestComposeArgumentsAndLogIsolation(t *testing.T) {
 		t.Fatal(paths)
 	}
 }
+
+func TestExternalComposeOnlyInspects(t *testing.T) {
+	dir := t.TempDir()
+	// Fail any command other than read-only Compose inspection.
+	script := "#!/bin/sh\ncase \"$*\" in\n  *'ps --all --format json') printf '%s\\n' '{\"Name\":\"existing-api\",\"Service\":\"api\",\"State\":\"running\",\"Health\":\"healthy\"}';;\n  *) exit 99;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	a := config.App{Type: "external", Cwd: dir, Detect: config.Check{Type: "docker"}, Docker: config.Docker{ComposeFile: "compose.yml", ProjectName: "existing"}}
+	r := Registry(dir, config.Logging{})["external"]
+	st, err := r.Status(context.Background(), a, Runtime{Owned: true})
+	if err != nil || !st.Running || !st.External || len(st.Containers) != 1 {
+		t.Fatalf("unowned Compose inspection failed: %+v %v", st, err)
+	}
+	if _, err := r.Start(context.Background(), a); err == nil {
+		t.Fatal("observation runner accepted start")
+	}
+	if err := r.Stop(context.Background(), a, Runtime{Owned: true}, true); err == nil {
+		t.Fatal("observation runner accepted force stop")
+	}
+	if r.LogCommand(a).Command != "" {
+		t.Fatal("observation runner spawned a log follower")
+	}
+}

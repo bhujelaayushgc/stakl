@@ -180,6 +180,8 @@ type Config struct {
 		Port        int    `yaml:"port" json:"port"`
 		OpenBrowser *bool  `yaml:"open_browser" json:"open_browser"`
 		Token       string `yaml:"token,omitempty" json:"-"`
+		TLSCertFile string `yaml:"tls_cert_file,omitempty" json:"tls_cert_file,omitempty"`
+		TLSKeyFile  string `yaml:"tls_key_file,omitempty" json:"tls_key_file,omitempty"`
 	} `yaml:"server" json:"server"`
 	Defaults struct {
 		StopTimeout       Duration `yaml:"stop_timeout" json:"stop_timeout"`
@@ -266,6 +268,13 @@ func Parse(b []byte, base string) (*Config, error) {
 	if !ip.IsLoopback() && len(c.Server.Token) < 32 {
 		return nil, fmt.Errorf("server.token must contain at least 32 characters when binding beyond localhost")
 	}
+	if (c.Server.TLSCertFile == "") != (c.Server.TLSKeyFile == "") {
+		return nil, fmt.Errorf("server.tls_cert_file and server.tls_key_file must be set together")
+	}
+	if c.Server.TLSCertFile != "" {
+		c.Server.TLSCertFile = Expand(c.Server.TLSCertFile, base)
+		c.Server.TLSKeyFile = Expand(c.Server.TLSKeyFile, base)
+	}
 	if c.Defaults.StopTimeout == 0 {
 		c.Defaults.StopTimeout = Duration(10 * time.Second)
 	}
@@ -314,7 +323,7 @@ func Parse(b []byte, base string) (*Config, error) {
 			a.Type = "process"
 		}
 		switch a.Type {
-		case "process", "shell", "docker-compose", "custom":
+		case "process", "shell", "docker-compose", "custom", "external":
 		default:
 			return nil, fmt.Errorf("%s.type: unknown runner %q", prefix, a.Type)
 		}
@@ -333,7 +342,18 @@ func Parse(b []byte, base string) (*Config, error) {
 		if a.Type != "custom" && (a.Stop.Command != "" || a.Status.Command != "" || a.RestartCommand.Command != "" || a.Logs.Command != "") {
 			return nil, fmt.Errorf("%s: stop/status/restart/log commands require type custom", prefix)
 		}
-		if a.Type != "docker-compose" && a.Start.Command == "" {
+		if a.Type == "external" {
+			if a.Detect.Type == "" {
+				return nil, fmt.Errorf("%s.detect.type is required for observation-only apps", prefix)
+			}
+			if a.Start.Command != "" || len(a.Start.Args) > 0 || a.Start.Shell || a.Autostart.Enabled || (a.Restart.Policy != "" && a.Restart.Policy != "never") || a.Lifecycle.StopOnExit {
+				return nil, fmt.Errorf("%s: observation-only apps cannot configure lifecycle actions", prefix)
+			}
+			if a.Health.Type == "process" && a.Health.Name == "" {
+				return nil, fmt.Errorf("%s.health.name is required for observation-only process checks", prefix)
+			}
+		}
+		if a.Type != "docker-compose" && a.Type != "external" && a.Start.Command == "" {
 			return nil, fmt.Errorf("%s.start.command is required", prefix)
 		}
 		if a.Type == "custom" && a.Stop.Command == "" && a.Status.Command != "" {
@@ -376,7 +396,7 @@ func Parse(b []byte, base string) (*Config, error) {
 		if a.Docker.StopMode != "stop" && a.Docker.StopMode != "down" {
 			return nil, fmt.Errorf("%s.docker.stop_mode must be stop or down", prefix)
 		}
-		if a.Type == "docker-compose" {
+		if a.Type == "docker-compose" || (a.Type == "external" && (a.Detect.Type == "docker" || a.Health.Type == "docker")) {
 			if a.Docker.ProjectName == "" {
 				a.Docker.ProjectName = id
 			}

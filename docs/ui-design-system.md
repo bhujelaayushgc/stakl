@@ -27,15 +27,15 @@ Terminal heritage comes from precise alignment, tabular numbers, restrained mono
 └──────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-Left-align names, headings, controls, and prose. Align numbers and timestamps consistently within their columns. Let tables use available width; constrain explanatory prose to about 68 characters. Use a fixed 208 px navigation rail on wide screens, a 52 px utility bar, and 24 px content gutters. The rail and work area share neutral colors, with a single boundary between them. Avoid a dark green rail beside a light canvas: that contrast makes the chrome louder than the processes.
+Left-align names, headings, controls, and prose. Align numbers and timestamps consistently within their columns. Let tables use available width; constrain explanatory prose to about 68 characters. Use a fixed 208 px navigation rail on wide screens, a 52 px utility bar, and 32 px desktop content gutters. The rail and work area share neutral colors, with a single boundary between them. Avoid a dark green rail beside a light canvas: that contrast makes the chrome louder than the processes.
 
 ## Design tokens
 
-These are target values for a later implementation, not changes to the current stylesheet. Token names are semantic so both themes preserve the same hierarchy.
+These are design reference values. The implemented tokens and responsive rules live in `web/src/workstation.css`; shared base styles remain in `web/src/style.css`. Both themes preserve the same hierarchy.
 
 ### Typography
 
-Use **IBM Plex Sans** for the interface and **IBM Plex Mono** for commands, paths, PIDs, ports, timestamps, and logs. Their related shapes give Stakl an engineered character without turning ordinary labels into terminal text. Bundle the fonts locally with the embedded frontend when implemented; use system sans and system monospace fallbacks while fonts load. Use tabular numerals for changing counts and runtime values. Do not use all-caps section labels or tracked-out table headers.
+Use **IBM Plex Sans** for the interface and **IBM Plex Mono** for commands, paths, PIDs, ports, timestamps, and logs. Their related shapes give Stakl an engineered character without turning ordinary labels into terminal text. The fonts are bundled locally with the embedded frontend, with system sans and system monospace fallbacks while fonts load. Use tabular numerals for changing counts and runtime values. Do not use all-caps section labels or tracked-out table headers.
 
 | Role | Size / line height | Weight | Use |
 | --- | --- | --- | --- |
@@ -97,7 +97,7 @@ Hover changes a row or control to a subtle neutral surface. It must not be the o
 
 ### Navigation
 
-The primary destinations are **Applications, Ports, Activity, Configuration, System**. Rename the current Overview to Applications. Move Favorites into an application filter and Discover apps into the Applications toolbar. Keep the command palette available through `Cmd/Ctrl+K` and a compact search trigger. Put theme choice in a small utility menu or System view instead of a permanent three-button switch. Keep controller connection state in one persistent place in the utility bar; remove redundant live-status and local-machine reminders.
+The primary destinations are **Applications, Ports, Activity, Configuration, System**. Applications replaces the previous Overview destination. Favorites is an application filter and Discover apps opens from the Applications toolbar. The command palette is available through `Cmd/Ctrl+K` and the Find anything trigger. Theme choice and controller connection state live in the utility bar.
 
 On narrow screens, navigation becomes a drawer with the current destination visible in the utility bar. The drawer closes after selection and returns focus to the trigger. Prioritize application name, state, and lifecycle action in the narrow list; move PID, logs, and secondary actions into detail or the overflow menu. Do not shrink core text below 12 px to preserve desktop columns. A detail pane opens beside the list on wide screens and full-screen on narrow screens; closing it returns focus to the application name that opened it. Preserve the current tab when live data refreshes.
 
@@ -148,20 +148,20 @@ Loading keeps stable row or pane dimensions. On first load, show a short `Connec
 
 Errors name the failed operation and useful next step: `Configuration could not reload` plus the parser error and `Open configuration`; `Port scan failed` plus `Retry scan`; `Could not start API server` plus the backend message and `Open logs`. Keep errors near the affected view or row. A connection loss remains persistent in the utility bar until recovered. Success feedback can be brief and quiet; it should not compete with the updated row state.
 
-## Component decisions for the redesign
+## Implemented redesign
 
-| Current UI | Direction |
+| Previous UI | Current implementation |
 | --- | --- |
-| Five-cell `.summary` strip | Remove as a separate block. Keep useful counts as compact text beside a single status filter in the Applications toolbar. |
-| `.profile-card` grid | Replace with profile rows in one section above applications. |
-| Rounded `.app-table`, `.app-symbol` tiles, green row edge, filled status chips | Reduce to a single ledger surface, plain type icons, row dividers, and dot-plus-label status. |
-| Separate Favorites navigation item | Merge into the application filter; keep pinning available. |
-| Discover apps navigation item | Move to the Applications toolbar and empty state. |
-| `.local-tag`, `.local-note`, `.dashboard-footer`, repeated `Live status` labels | Remove. Controller connection and locality appear once in persistent chrome. |
-| Three-button `.theme-switch` in the rail | Move to a utility menu or System preference. |
-| `.properties` boxed cells, `.config-banner`, decorative timeline icon circles | Flatten into aligned rows with only structural rules. |
-| Centered `.onboarding` panel and shared large-icon `.empty` treatment | Replace with contextual, left-aligned states in the normal content flow. |
-| Repeated action icons in every app row | Keep one lifecycle action and a direct detail or log affordance; consolidate the rest in the existing menu. |
+| Five-cell `.summary` strip | Inline application, running, and attention counts in the Applications toolbar. |
+| `.profile-card` grid | Profile rows in one section above applications. |
+| Rounded `.app-table`, `.app-symbol` tiles, green row edge, filled status chips | Flat ledger surface, plain type icons, row dividers, and dot-plus-label status. |
+| Separate Favorites navigation item | Application filter with pinning available from each row's menu. |
+| Discover apps navigation item | Applications toolbar and empty state. |
+| `.local-tag`, `.local-note`, `.dashboard-footer`, repeated `Live status` labels | One controller connection indicator in the utility bar. |
+| Three-button `.theme-switch` in the rail | Theme selector in the utility bar. |
+| `.properties` boxed cells, `.config-banner`, decorative timeline icon circles | Aligned rows with structural rules. |
+| Centered `.onboarding` panel and shared large-icon `.empty` treatment | Contextual, left-aligned states in the normal content flow. |
+| Repeated action icons in every app row | Direct log and lifecycle controls; secondary actions in the row menu. |
 
 Keep the existing command palette, detail tabs, live log controls, YAML reveal and backup behavior, discovery review, confirmation gates, semantic status labels, dark/light/system support, and keyboard access. Their behavior fits the product; their surfaces and spacing should follow this system.
 
@@ -171,7 +171,7 @@ The obvious first pass would keep the dark green sidebar and turn every process 
 
 ## Implementation primitives
 
-The Overview is the current reference implementation. Reuse its primitives when each remaining screen is redesigned; do not apply its page scope to older screens as a blanket style change.
+Applications is the reference for the workstation layout. The shared primitives also support Ports, Activity, Configuration, discovery, System, and application details. Keep screen-specific behavior and responsive choices in their owning view.
 
 | Primitive | Implementation | Use |
 | --- | --- | --- |
@@ -181,4 +181,4 @@ The Overview is the current reference implementation. Reuse its primitives when 
 | State and actions | `StatusIndicator`, `IconButton`, existing `.button` variants, `workstation-action-row` | State is a dot plus word. Keep one lifecycle action visible; use the existing Radix `.dropdown` menu for secondary actions. |
 | Empty states | `EmptyState` with optional `plain` treatment | Keep the heading and toolbar in place and provide a next action. |
 
-React primitives live in `web/src/ui.tsx`; canonical shell and Overview styles live in `web/src/workstation.css`. The old `web/src/style.css` still supports screens awaiting redesign. Application runtime details, profile membership, and responsive column choices stay in the Overview implementation because they express that screen's content, not a universal component API. A generic raised panel is intentionally absent: the list surface is flat, while dialogs and menus retain their existing floating surfaces.
+React primitives live in `web/src/ui.tsx`; canonical shell, application ledger, detail, and workspace view styles live in `web/src/workstation.css`. `web/src/style.css` retains shared base styles. Application runtime details, profile membership, and responsive column choices stay in the Applications implementation because they express that screen's content, not a universal component API. A generic raised panel is intentionally absent: the list surface is flat, while dialogs and menus retain their existing floating surfaces. See [the README](../README.md) for current light, dark, logs, and mobile captures.
