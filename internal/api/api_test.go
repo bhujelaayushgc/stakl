@@ -180,3 +180,37 @@ func TestDiscoverTaskFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoverPrefersComposeOverOtherProjectFiles(t *testing.T) {
+	for _, compose := range []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"} {
+		for _, other := range []string{"Makefile", ".justfile", "Cargo.toml"} {
+			t.Run(compose+"_with_"+other, func(t *testing.T) {
+				dir := t.TempDir()
+				for _, file := range []string{compose, other} {
+					if err := os.WriteFile(filepath.Join(dir, file), []byte("services: {}\n"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				body, err := json.Marshal(map[string]string{"path": dir})
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := httptest.NewRecorder()
+				(&Server{}).discover(w, httptest.NewRequest("POST", "/api/discover", bytes.NewReader(body)))
+				if w.Code != http.StatusOK {
+					t.Fatal(w.Code, w.Body.String())
+				}
+				var result struct {
+					Suggestions []Suggestion `json:"suggestions"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				want := Suggestion{Path: dir, Type: "docker-compose", Indicator: compose, Name: filepath.Base(dir)}
+				if len(result.Suggestions) != 1 || result.Suggestions[0] != want {
+					t.Fatalf("got %+v, want %+v", result.Suggestions, want)
+				}
+			})
+		}
+	}
+}

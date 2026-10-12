@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"github.com/bhujelaayushgc/stakl/internal/config"
+	"github.com/bhujelaayushgc/stakl/internal/hosts"
 	"github.com/bhujelaayushgc/stakl/internal/manager"
+	"github.com/bhujelaayushgc/stakl/internal/peeraccess"
 	"github.com/bhujelaayushgc/stakl/internal/runner"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
 	"io"
@@ -15,7 +18,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,11 +31,20 @@ import (
 
 type Server struct {
 	Manager                 *manager.Manager
+	Hosts                   *hosts.Registry
+	PeerAccess              *peeraccess.Controller
 	Token, Address, Version string
 	Started                 time.Time
 	Assets                  fs.FS
 	BindHost                string
+	Certificate             *x509.Certificate
 	saveMu                  sync.Mutex
+	ControllerID            string
+	controllerOnce          sync.Once
+	controllerErr           error
+	peerMu                  sync.Mutex
+	peerStreams             map[string]map[*peerStream]struct{}
+	peerClosed              bool
 }
 
 func JSON(w http.ResponseWriter, v any) {
@@ -45,8 +56,22 @@ func errorJSON(w http.ResponseWriter, e error, status int) {
 	w.WriteHeader(status)
 	JSON(w, map[string]string{"error": e.Error()})
 }
+func (s *Server) initController() {
+	s.controllerOnce.Do(func() {
+		if s.ControllerID == "" && s.Manager != nil && s.Manager.Store != nil {
+			s.ControllerID, s.controllerErr = s.Manager.Store.ControllerID()
+		}
+		if s.ControllerID == "" && s.controllerErr == nil {
+			s.controllerErr = fmt.Errorf("controller identity unavailable")
+		}
+	})
+}
 func (s *Server) Handler() http.Handler {
+	s.initController()
 	mux := http.NewServeMux()
+	s.peerRoutes(mux)
+	s.hostRoutes(mux)
+	s.peerAccessRoutes(mux)
 	mux.HandleFunc("GET /api/apps", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Views()) })
 	mux.HandleFunc("GET /api/apps/{id}", s.app)
 	mux.HandleFunc("POST /api/apps/{id}/{action}", s.action)
@@ -88,6 +113,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/system/status", s.system)
 	mux.HandleFunc("GET /api/system/ports", s.ports)
+	mux.HandleFunc("POST /api/system/observe", s.observe)
+	mux.HandleFunc("GET /api/system/directories", s.directories)
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Store.History("")) })
 	mux.HandleFunc("POST /api/discover", s.discover)
 	mux.HandleFunc("GET /api/system/docker", func(w http.ResponseWriter, r *http.Request) { JSON(w, runner.DockerAvailable()) })
@@ -114,11 +141,18 @@ func (s *Server) Handler() http.Handler {
 				http.Error(w, "Invalid dashboard token", http.StatusUnauthorized)
 				return
 			}
-			http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Value: s.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+			http.SetCookie(w, &http.Cookie{Name: s.cookieName(), Value: s.Token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if strings.HasPrefix(r.URL.Path, "/api/peer/v1/") {
+				peerRequest, ok := s.authenticatePeer(w, r)
+				if ok {
+					mux.ServeHTTP(w, peerRequest)
+				}
+				return
+			}
 			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if cookie, e := r.Cookie(s.cookieName()); e == nil && token == "" {
 				token = cookie.Value
@@ -127,7 +161,11 @@ func (s *Server) Handler() http.Handler {
 				errorJSON(w, fmt.Errorf("open Stakl from the CLI to authenticate this browser"), 401)
 				return
 			}
-			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			if origin := r.Header.Get("Origin"); origin != "" && origin != scheme+"://"+r.Host {
 				errorJSON(w, fmt.Errorf("cross-origin request refused"), 403)
 				return
 			}
@@ -147,11 +185,17 @@ func (s *Server) validHost(address string) bool {
 	if address == s.Address {
 		return true
 	}
+	host, port, e := net.SplitHostPort(address)
+	_, expected, _ := net.SplitHostPort(s.Address)
+	if e != nil || port != expected {
+		return false
+	}
+	if s.Certificate != nil && s.Certificate.VerifyHostname(host) == nil {
+		return true
+	}
 	if s.BindHost != "0.0.0.0" && s.BindHost != "::" {
 		return false
 	}
-	host, port, e := net.SplitHostPort(address)
-	_, expected, _ := net.SplitHostPort(s.Address)
 	ip := net.ParseIP(host)
 	return e == nil && port == expected && ip != nil && !ip.IsUnspecified()
 }
@@ -419,7 +463,7 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []Suggestion{}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	count := 0
 	e := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -440,9 +484,6 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		dir := filepath.Dir(path)
-		if seen[dir] {
-			return nil
-		}
 		s := Suggestion{Path: dir, Type: "process", Indicator: d.Name(), Name: filepath.Base(dir)}
 		switch d.Name() {
 		case "compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml":
@@ -480,7 +521,13 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 		default:
 			return nil
 		}
-		seen[dir] = true
+		if index, ok := seen[dir]; ok {
+			if s.Type == "docker-compose" && out[index].Type != "docker-compose" {
+				out[index] = s
+			}
+			return nil
+		}
+		seen[dir] = len(out)
 		out = append(out, s)
 		return nil
 	})
@@ -557,21 +604,5 @@ end run`
 	}
 }
 func Client(ctx context.Context, address, token, method, path string, body io.Reader) (*http.Response, error) {
-	u, e := url.Parse(address)
-	if e != nil {
-		return nil, e
-	}
-	req, e := http.NewRequestWithContext(ctx, method, u.String()+path, body)
-	if e != nil {
-		return nil, e
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Stakl", "1")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DisableKeepAlives = true
-	return (&http.Client{Transport: transport}).Do(req)
+	return ClientWithCA(ctx, address, token, method, path, body, nil)
 }

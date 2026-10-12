@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Radio, RefreshCw, Search } from "lucide-react";
-import { App, PortScan, request, servicePorts } from "./types";
+import { RefreshCw } from "lucide-react";
+import {
+  App,
+  PortScan,
+  request,
+  servicePorts,
+  type ListeningPort,
+} from "./types";
+import { PageHeader, SearchField } from "./ui";
+const numberFormat = new Intl.NumberFormat();
 
 export function usePortScan(enabled: boolean) {
   const [scan, setScan] = useState<PortScan | null>(null);
@@ -15,7 +23,9 @@ export function usePortScan(enabled: boolean) {
       setScan(await request<PortScan>("/system/ports"));
       setError("");
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        `Could not scan local ports: ${(e as Error).message}. Check that the controller is connected, then refresh.`,
+      );
       setScan(null);
     } finally {
       pending.current = false;
@@ -37,8 +47,10 @@ export function PortsPage({
   error,
   loading,
   refresh,
+  onObserve,
 }: {
   apps: App[];
+  onObserve?: (listener: ListeningPort) => void;
 } & ReturnType<typeof usePortScan>) {
   const [query, setQuery] = useState("");
   const listeners = scan?.ports || [];
@@ -81,33 +93,66 @@ export function PortsPage({
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
+  const sections = [
+    {
+      title: "Stakl-related ports",
+      rows: filtered.filter((p) => servicesFor(p.port, p.protocol)),
+      associated: true,
+      empty: query
+        ? "No Stakl ports match this search."
+        : "No ports are associated with Stakl applications.",
+    },
+    {
+      title: "Other local ports",
+      rows: filtered.filter((p) => !servicesFor(p.port, p.protocol)),
+      associated: false,
+      empty: query
+        ? "No other local ports match this search."
+        : "No other local ports detected.",
+    },
+  ];
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <h1>Ports</h1>
-          <p>Check occupied ports before starting another service.</p>
-        </div>
-        <button className="button" onClick={refresh} disabled={loading}>
-          <RefreshCw size={15} className={loading ? "spin" : ""} />
-          {loading ? "Scanning…" : "Refresh ports"}
-        </button>
-      </div>
-      <p className="muted ports-note">
-        TCP listeners and UDP bindings visible to your user, including services
-        outside Stakl, plus Docker's published host ports. Configured ports
-        remain listed when no listener is detected. An unlisted port is not
-        guaranteed to be available.
-      </p>
-      <label className="search-field ports-search">
-        <Search size={16} />
-        <input
-          aria-label="Search ports"
+      <PageHeader
+        title="Ports"
+        description="Inspect local listeners or add an existing service for observation."
+        actions={
+          <button className="button" onClick={refresh} disabled={loading}>
+            <RefreshCw
+              size={15}
+              className={loading ? "spin" : ""}
+              aria-hidden="true"
+            />
+            {loading ? "Scanning…" : "Refresh ports"}
+          </button>
+        }
+      />
+      <div className="workstation-toolbar ports-toolbar">
+        <SearchField
+          label="Search ports"
+          name="port-search"
           placeholder="Find a port, process, or service"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={setQuery}
+          onClear={() => setQuery("")}
         />
-      </label>
+        {scan && (
+          <span className="ports-scan-meta">
+            {numberFormat.format(
+              new Set(
+                rows
+                  .filter((p) => p.occupied)
+                  .map((p) => `${p.protocol}:${p.port}`),
+              ).size,
+            )}{" "}
+            occupied · Updated{" "}
+            <time dateTime={scan.scanned_at}>
+              {new Date(scan.scanned_at).toLocaleTimeString()}
+            </time>
+            {" · "}Refreshes every 15 seconds
+          </span>
+        )}
+      </div>
       {error && (
         <div className="alert error" role="alert">
           {error}
@@ -119,83 +164,103 @@ export function PortsPage({
         </div>
       )}
       {!scan && !error && <p role="status">Scanning local ports…</p>}
-      {scan && (
-        <>
-          <p className="muted ports-note" role="status">
-            {
-              new Set(
-                rows
-                  .filter((p) => p.occupied)
-                  .map((p) => `${p.protocol}:${p.port}`),
-              ).size
-            }{" "}
-            occupied ports · Updated{" "}
-            {new Date(scan.scanned_at).toLocaleTimeString()} · Refreshes every
-            15 seconds
-          </p>
-          <div
-            className="ports-table-wrap"
-            role="region"
-            aria-label="Port inventory"
-            tabIndex={0}
-          >
-            <table className="ports-table">
-              <caption className="sr-only">
-                Local port occupancy and configured services
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Port</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Process</th>
-                  <th scope="col">Address</th>
-                  <th scope="col">Stakl services</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => (
-                  <tr key={`${p.protocol}:${p.port}:${p.pid}:${p.address}`}>
-                    <th scope="row">
-                      <code>{p.port}</code>
-                      <small>{p.protocol}</small>
-                    </th>
-                    <td>
-                      <span
-                        className={`status ${p.occupied ? "status-unhealthy" : "status-stopped"}`}
+      {scan &&
+        sections.map((section) => (
+          <section className="ports-section" key={section.title}>
+            <div className="workstation-section-heading ports-section-heading">
+              <h2>{section.title}</h2>
+              <span>{numberFormat.format(section.rows.length)}</span>
+            </div>
+            {section.rows.length ? (
+              <div
+                className="ports-table-wrap"
+                role="region"
+                aria-label={section.title}
+                tabIndex={0}
+              >
+                <table
+                  className={`ports-table${section.associated ? " ports-table-associated" : ""}`}
+                >
+                  <caption className="sr-only">
+                    {section.title} port inventory
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Port</th>
+                      <th scope="col">Status</th>
+                      {section.associated && <th scope="col">Application</th>}
+                      <th scope="col">Process</th>
+                      <th scope="col">Address</th>
+                      {!section.associated && onObserve && (
+                        <th scope="col">Add to Stakl</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {section.rows.map((p) => (
+                      <tr
+                        key={`${p.protocol}:${p.port}:${p.pid}:${p.address}:${p.family || ""}`}
                       >
-                        <span className="status-dot" />
-                        {p.occupied ? "Occupied" : "Not detected"}
-                      </span>
-                    </td>
-                    <td>
-                      {p.process ||
-                        (p.occupied
-                          ? "Service-reported port"
-                          : "No listener detected")}
-                      {p.pid > 0 && <small>PID {p.pid}</small>}
-                    </td>
-                    <td>
-                      <code>{p.address || "-"}</code>
-                    </td>
-                    <td>{servicesFor(p.port, p.protocol) || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filtered.length === 0 && (
-              <div className="empty">
-                <Radio size={28} />
-                <h3>{query ? "No matching ports" : "No ports detected"}</h3>
-                <p>
-                  {query
-                    ? "Try a different port number or process name."
-                    : "Refresh after starting a service to inspect its ports."}
-                </p>
+                        <th scope="row">
+                          <code>{p.port}</code>
+                          <small>{p.protocol}</small>
+                        </th>
+                        <td>
+                          <span
+                            className={`status ${p.occupied ? "ports-occupied" : "status-stopped"}`}
+                          >
+                            <span className="status-dot" />
+                            {p.occupied ? "Occupied" : "Not detected"}
+                          </span>
+                        </td>
+                        {section.associated && (
+                          <td>{servicesFor(p.port, p.protocol)}</td>
+                        )}
+                        <td>
+                          {p.process ||
+                            (p.occupied
+                              ? "Service-reported port"
+                              : "No listener detected")}
+                          {p.pid > 0 && <small>PID {p.pid}</small>}
+                        </td>
+                        <td>
+                          <code>{p.address || "-"}</code>
+                          {p.family && <small>{p.family}</small>}
+                        </td>
+                        {!section.associated && onObserve && (
+                          <td>
+                            <button
+                              className="button small"
+                              aria-label={`Observe ${p.protocol} port ${p.port}`}
+                              disabled={p.protocol !== "TCP"}
+                              title={
+                                p.protocol !== "TCP"
+                                  ? "UDP needs an explicit check. Use Add app and choose Observation only."
+                                  : "Review an observation-only app"
+                              }
+                              onClick={() => {
+                                const { occupied: _, ...listener } = p;
+                                onObserve(listener);
+                              }}
+                            >
+                              Observe
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+            ) : (
+              <p className="ports-section-empty">{section.empty}</p>
             )}
-          </div>
-        </>
-      )}
+          </section>
+        ))}
+      <p className="muted ports-note">
+        Shows TCP and UDP listeners visible to your user, Docker host ports, and
+        configured app ports. An unlisted port may still be unavailable.
+      </p>
     </>
   );
 }

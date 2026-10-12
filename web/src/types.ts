@@ -17,8 +17,8 @@ export interface AppConfig {
   cwd: string;
   start: { command: string; args?: string[] };
   stop: { command?: string };
-  health: { type: string };
-  detect: { type: string };
+  health: { type: string; url?: string };
+  detect: { type: string; host?: string; port?: number };
   depends_on: Record<string, { condition: string }>;
   links: Record<string, string>;
   ports: { name: string; port: number }[];
@@ -45,6 +45,7 @@ export interface Runtime {
   next_restart?: string;
 }
 export interface App {
+  host?: HostDescription;
   config: AppConfig;
   effective_config?: AppConfig;
   runtime: Runtime;
@@ -72,6 +73,7 @@ export interface ListeningPort {
   port: number;
   protocol: "TCP" | "UDP";
   address: string;
+  family?: "IPv4" | "IPv6";
   pid: number;
   pgid: number;
   process: string;
@@ -82,6 +84,7 @@ export interface PortScan {
   warning: string;
 }
 export function servicePorts(app: App, listeners: ListeningPort[]) {
+  if (app.host && app.host.id !== "local") listeners = [];
   const config = isActive(app.runtime.state)
     ? app.effective_config || app.config
     : app.config;
@@ -97,6 +100,19 @@ export function servicePorts(app: App, listeners: ListeningPort[]) {
         !!app.ports?.[p.port] ||
         listeners.some((l) => l.protocol === "TCP" && l.port === p.port),
     });
+  }
+  if (
+    config.type === "external" &&
+    ["tcp", "port"].includes(config.detect?.type) &&
+    config.detect.port
+  ) {
+    const port = config.detect.port;
+    if (!ports.has(`TCP:${port}`))
+      ports.set(`TCP:${port}`, {
+        port,
+        protocol: "TCP",
+        occupied: app.runtime.state === "external",
+      });
   }
   if (isActive(app.runtime.state)) {
     for (const container of app.containers || []) {
@@ -167,6 +183,10 @@ export const isActive = (s: Status) =>
     "external",
     "stopping",
   ].includes(s);
+export const canStopApp = (app: App) =>
+  app.config.type !== "external" &&
+  (app.runtime.owned ||
+    (app.config.type === "custom" && !!app.config.stop?.command));
 export const label = (s: string) =>
   ({
     active: "All running",
@@ -182,7 +202,11 @@ export const label = (s: string) =>
     failed: "Failed",
   })[s] || s;
 export const typeLabel = (s: string) =>
-  s === "docker-compose" ? "Compose" : s.charAt(0).toUpperCase() + s.slice(1);
+  s === "external"
+    ? "Observation only"
+    : s === "docker-compose"
+      ? "Compose"
+      : s.charAt(0).toUpperCase() + s.slice(1);
 export function filterApps(
   apps: App[],
   search: string,
@@ -202,7 +226,12 @@ export function filterApps(
             ? ["failed", "unhealthy", "unknown"].includes(a.runtime.state)
             : a.runtime.state === status)) &&
       (!type || a.config.type === type) &&
-      (!favorites || pinned.has(a.config.id)) &&
+      (!favorites ||
+        pinned.has(
+          a.host
+            ? JSON.stringify([a.host.controller_id, a.config.id])
+            : a.config.id,
+        )) &&
       [
         a.config.name,
         a.config.id,
@@ -222,19 +251,96 @@ export function profileState(p: Profile, apps: App[]) {
     failed: selected.some((a) => a.runtime.state === "failed"),
   };
 }
-export async function request<T>(path: string, body?: unknown): Promise<T> {
-  const r = await fetch("/api" + path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: { "Content-Type": "application/json", "X-Stakl": "1" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+export type HostState =
+  | "connecting"
+  | "online"
+  | "unavailable"
+  | "unauthorized"
+  | "incompatible"
+  | "identity_mismatch";
+export interface HostDescription {
+  id: string;
+  controller_id: string;
+  name: string;
+  url: string;
+  access: "read" | "control";
+  state: HostState;
+  last_seen: string;
+  stale: boolean;
+  error: string;
+}
+export interface HostEnvelope {
+  host: HostDescription;
+  groups: Config["groups"];
+  apps: App[];
+}
+export interface HostResponse<T> {
+  host: HostDescription;
+  data: T;
+}
+export interface HostedApp extends App {
+  host: HostDescription;
+}
+export interface PeerGrant {
+  id: string;
+  name: string;
+  access: "read" | "control";
+  created_at: string;
+}
+export type PeerAccessStatus = {
+  enabled: boolean;
+  running: boolean;
+  address: string;
+  port: number;
+  endpoint: string;
+  ca_pem: string;
+  certificate_expires_at: string;
+  has_certificate: boolean;
+  addresses: string[];
+  error: string;
+  primary_network_access: boolean;
+};
+
+export class RequestError extends Error {
+  state?: HostState;
+  outcome_unknown: boolean;
+  constructor(
+    message: string,
+    details: { state?: HostState; outcome_unknown?: boolean } = {},
+  ) {
+    super(message);
+    this.name = "RequestError";
+    this.state = details.state;
+    this.outcome_unknown = details.outcome_unknown === true;
+  }
+}
+export async function request<T>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  let r: Response;
+  try {
+    r = await fetch("/api" + path, {
+      method: body === undefined ? "GET" : "POST",
+      signal,
+      headers: { "Content-Type": "application/json", "X-Stakl": "1" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new RequestError("Connection lost", {
+      outcome_unknown: body !== undefined,
+    });
+  }
   let data;
   try {
     data = await r.json();
   } catch {
-    throw Error(`Stakl returned HTTP ${r.status}`);
+    throw new RequestError(`Stakl returned HTTP ${r.status}`, {
+      outcome_unknown: body !== undefined,
+    });
   }
-  if (!r.ok) throw Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) throw new RequestError(data.error || `HTTP ${r.status}`, data);
   return data;
 }
 export function elapsed(value: string) {

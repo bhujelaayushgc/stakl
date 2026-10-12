@@ -1,6 +1,6 @@
 module github.com/bhujelaayushgc/stakl
 
-go 1.26.0
+go 1.26.9
 
 require (
 	github.com/mattn/go-shellwords v1.0.15

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   App,
+  canStopApp,
   filterApps,
   isActive,
   profileState,
@@ -118,6 +119,17 @@ describe("dashboard state", () => {
     expect(isActive("unhealthy")).toBe(true);
     expect(isActive("external")).toBe(true);
     expect(isActive("failed")).toBe(false);
+  });
+  it("only offers stop for owned apps or configured custom stops", () => {
+    const external = app("external", "external");
+    external.runtime.owned = false;
+    expect(canStopApp(external)).toBe(false);
+    external.config.type = "custom";
+    external.config.stop = { command: "stop-service" };
+    expect(canStopApp(external)).toBe(true);
+    external.runtime.owned = true;
+    external.config.stop = {};
+    expect(canStopApp(external)).toBe(true);
   });
   it("combines search, group, type, status and favorites", () => {
     const apps = [

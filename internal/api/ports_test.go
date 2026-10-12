@@ -61,3 +61,18 @@ func TestParseListeningPorts(t *testing.T) {
 		}
 	}
 }
+
+func TestPortInventoryPreservesWildcardAddressFamilies(t *testing.T) {
+	ports := parseListeningPorts("p42\ncnode\nf5\ntIPv4\nn*:3000\nf6\ntIPv6\nn*:3000\n", "TCP")
+	b, err := json.Marshal(ports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result []struct{ Family string }
+	if err := json.Unmarshal(b, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 2 || result[0].Family != "IPv4" || result[1].Family != "IPv6" {
+		t.Fatalf("lost socket family: %s", b)
+	}
+}
