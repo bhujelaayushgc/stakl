@@ -55,7 +55,7 @@ Linux users can replace `shasum -a 256` with `sha256sum`. Release binaries are n
 
 ## Build and run
 
-Requires Go 1.26.9+ and Node.js 22+ **to build**. The resulting executable needs neither Node.js nor Go. Docker is optional.
+Requires Go 1.26.9+ and Node.js 22.22.2+ (22.x), 24.15.0+ (24.x), or 26+ **to build**. The resulting executable needs neither Node.js nor Go. Docker is optional.
 
 ```sh
 make build

@@ -32,11 +32,11 @@
     "@types/prismjs": "^1.26.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.1.2",
     "jsdom": "^30.1.2",
     "prettier": "^3.9.9",
     "typescript": "^7.0.2",
-    "vite": "^6.1.0",
+    "vite": "^8.3.4",
     "vitest": "^5.0.1"
   }
 }
