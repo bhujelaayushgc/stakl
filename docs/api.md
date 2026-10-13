@@ -4,7 +4,7 @@ All routes require `Authorization: Bearer <instance token>` or the authenticated
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/api/apps` | Config (environment redacted), effective launch config, runtime, containers, ports |
+| GET | `/api/apps` | Config (environment redacted), effective launch config, runtime, containers, ports, completed observation and latest health evidence |
 | GET | `/api/apps/:id` | One application |
 | POST | `/api/apps/:id/start`, `/stop`, `/restart`, `/kill` | Per-app result map; errors are actionable strings |
 | POST | `/api/apps/:id/directory`, `/terminal` | Platform opener |
@@ -20,7 +20,7 @@ All routes require `Authorization: Bearer <instance token>` or the authenticated
 | POST | `/api/actions/stop?confirm=true` | Confirmed Stop All |
 | GET | `/api/events` | SSE lifecycle/config/health notifications |
 | GET | `/api/history` | Last 200 lifecycle events |
-| GET | `/api/config` | Path, groups, profiles, logging, active validation error |
+| GET | `/api/config` | Path, groups, profiles, safe workspace membership metadata, logging, active validation error |
 | GET | `/api/config?raw=true` | Explicitly reveal raw YAML plus source revision |
 | POST | `/api/config/validate` | `{yaml: "..."}`; no writes |
 | POST | `/api/config/save` | `{yaml: "...", revision: "..."}`; validate, compare revision, backup, save, reload |
@@ -34,6 +34,21 @@ All routes require `Authorization: Bearer <instance token>` or the authenticated
 Operations return a map such as `{"postgres":"ok","api":"dependency postgres did not become healthy"}`. Partial profile failure is not represented as a single success boolean. The CLI turns any failed result into a nonzero exit. Unknown routes and IDs return errors, never shell commands constructed from route text.
 
 SSE events contain `type`, optional `app`, `message`, and `time`. Clients refresh authoritative app data after events and on reconnect. Slow event subscribers drop notifications rather than blocking supervision. Logs are replayed from files and capped per request; a very noisy process can produce more lines than a view's tail budget between updates. The retained log files remain the full record until rotation.
+
+## Project workspaces
+
+These routes require the local administrator session. Peer Read and Control tokens cannot read workspace definitions or schedule their checks.
+
+| Method | Route | Contract |
+| --- | --- | --- |
+| GET | `/api/workspaces` | Workspace readiness, every member's evidence and sanitized check results |
+| GET | `/api/workspaces/:id` | One workspace; missing IDs return 404 |
+| GET | `/api/workspaces/impact?controller=local&app=postgres` | Known required/optional uses in this controller's definitions; accepts a stable controller identity for remote services |
+| POST | `/api/workspaces/:id/check` | Empty body or `{}`; 202 schedules configured probes, coalescing pending work. Request-supplied settings are rejected |
+
+GET requests read cached evidence. Checks run on the workspace controller with four workers, never on the browser or an arbitrary peer. Check responses omit commands, targets, environment files and output. Results expire and begin unknown after controller restart or successful configuration reload. Workspace definitions use the existing revision-protected config APIs; no workspace lifecycle endpoint exists. Deleting a definition leaves its services intact.
+
+App views include additive `observed_at` and optional `health_observation: {time, ok}` fields. Recovered runtime metadata alone does not establish freshness. Older peers without these fields remain usable in Applications; their workspace requirements remain unknown. Workspace members expose `observation_fresh` independently of failing project checks so individual service controls can respect freshness without treating a failed probe as lost ownership.
 
 ## Connected hosts
 

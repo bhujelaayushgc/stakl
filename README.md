@@ -35,6 +35,9 @@ You do not need to rewrite your setup on day one. Discover existing repositories
 ### Connect multiple machines over encrypted peer grants
 Run Stakl on your laptop, desktop, and remote build machines. Connect them together through the dashboard over HTTPS with server certificate verification and scoped bearer tokens. Issue **Read** tokens (inspect status, health, and logs) or **Control** tokens (start, stop, and restart individual apps) without sharing administrative credentials or exposing unprotected endpoints.
 
+### Know whether a project has what it needs
+**Workspaces** connect a project to local apps, connected-host services, and shared external endpoints. Check whether your standalone frontend can use its existing backend, or whether several apps can reach one PostgreSQL server. Required and optional members, fresh service observations, and project-specific HTTP, TCP, or command checks explain what is blocking readiness. Services stay under their existing ownership, and individual dashboard stop/restart actions warn about known dependent workspaces. [Configure workspaces](docs/configuration.md#project-workspaces).
+
 ---
 
 ## Install
@@ -257,6 +260,10 @@ stakl stop --all                     # Stop all running applications (prompts fo
 stakl profile start fullstack        # Start all applications in a profile
 stakl profile stop fullstack         # Stop all applications in a profile
 stakl profile restart fullstack      # Restart all applications in a profile
+
+# Project readiness (read-only)
+stakl workspace list                 # List project workspaces and readiness
+stakl workspace status memos-ui      # Explain member conditions and checks
 
 # Configuration and state
 stakl config validate                # Check YAML syntax and schema without starting

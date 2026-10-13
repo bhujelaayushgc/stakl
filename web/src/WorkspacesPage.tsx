@@ -18,6 +18,13 @@ type Props = {
 };
 const when = (time: string) =>
   !time || time.startsWith("0001-") ? "Not observed" : `${elapsed(time)} ago`;
+const oldestEvidence = (times: string[], missing: string) => {
+  if (!times.length || times.some((time) => !time || time.startsWith("0001-")))
+    return missing;
+  const timestamps = times.map((time) => Date.parse(time));
+  if (timestamps.some((time) => !Number.isFinite(time))) return missing;
+  return when(new Date(Math.min(...timestamps)).toISOString());
+};
 
 export function WorkspacesPage({
   apps,
@@ -338,6 +345,22 @@ export function WorkspacesPage({
                 <p>
                   {w.members.length} services - {w.required_issues} required
                   issues - {w.optional_issues} optional issues
+                </p>
+                <p>
+                  Oldest observation:{" "}
+                  {oldestEvidence(
+                    w.members.map((m) => m.observed_at),
+                    "Not observed",
+                  )}
+                  {" - "}
+                  {w.members.some((m) => m.checks.length > 0)
+                    ? `Oldest project check: ${oldestEvidence(
+                        w.members.flatMap((m) =>
+                          m.checks.map((p) => p.checked_at),
+                        ),
+                        "Not checked",
+                      )}`
+                    : "No project checks"}
                 </p>
               </div>
               <StatusIndicator status={w.state} />

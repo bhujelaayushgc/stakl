@@ -71,6 +71,69 @@ Groups only organize the dashboard. Profile memberships cross group boundaries. 
 
 All durations use Go syntax (`250ms`, `5s`, `2m`, `1h30m`). Negative durations are rejected. Zero values select the documented default where applicable.
 
+## Project workspaces
+
+Workspaces describe the services a project needs. Profiles remain collections for local start/stop operations; workspaces evaluate requirements across local and connected hosts. A service can appear in several workspaces without copying its configuration or changing its ownership.
+
+Use **Workspaces -> Create workspace** to select existing services. **Add external service** registers an observation-only HTTP or TCP endpoint and its membership in the same configuration save. This is useful for a shared database in a reachable Proxmox guest. Stakl does not discover or operate Proxmox VMs or containers. Workspace edits preserve unrelated YAML and use revision checks; conflicts retain the draft. Anchors, aliases and merges that cannot be edited safely require the full Configuration editor.
+
+```yaml
+apps:
+  shared-postgres:
+    name: Shared PostgreSQL
+    type: external
+    detect: {type: tcp, host: postgres.example.test, port: 5432}
+
+workspaces:
+  app-a:
+    name: App A
+    services:
+      database:
+        controller: local
+        app: shared-postgres
+        condition: running
+    checks:
+      query:
+        name: App A database login
+        service: database
+        env_file: [.env.app-a-health]
+        check:
+          type: command
+          command: psql -X -w -v ON_ERROR_STOP=1 -c 'SELECT 1'
+          interval: 30s
+          timeout: 2s
+  app-b:
+    name: App B
+    services:
+      database: {controller: local, app: shared-postgres}
+  memos-ui:
+    name: Memos frontend
+    services:
+      frontend: {controller: local, app: memos-ui}
+      backend:
+        controller: 0123456789abcdef0123456789abcdef
+        app: memos-backend
+        condition: healthy
+      optional-cache:
+        controller: local
+        app: cache
+        required: false
+```
+
+This fragment extends a version 1 configuration with existing `memos-ui`, `memos-backend` and `cache` apps. Hostnames and the remote controller identity are illustrative. `.env.app-a-health` must exist on the workspace controller and provide PostgreSQL connection settings; `psql` must be installed there. App A's query requirement is separate from App B's TCP availability requirement. An open port alone does not prove database authentication.
+
+Workspace IDs, member aliases, check IDs and app IDs use letters, digits, underscores or hyphens. Require a nonblank workspace name and at least one member. `controller` is `local` or the connected host's stable 32-character lowercase hexadecimal `controller_id`, available from `/api/hosts`. Connection names, URLs and routing IDs are not service identities. Renaming or reconnecting the same controller preserves references; missing services, disconnected hosts or changed identities become unknown without preventing configuration loading. Duplicate literal references are rejected. References that resolve to the same local service make readiness unknown even when optional, unless an independent required failure makes the workspace blocked. Their issue count includes the service once.
+
+Members default to `condition: running` and `required: true`. `running` accepts a fresh, stable running or externally available service. `healthy` also needs a fresh successful configured health result. Transitional states, missing observations and stale snapshots are unknown. Observation freshness is the greater of 15 seconds or twice the effective health/detection interval. An implausibly future timestamp is unknown. Every associated project check must pass as well.
+
+Readiness follows this order: a required failure is **Blocked**; otherwise an unknown required member is **Unknown**; otherwise an optional issue is **Degraded**; otherwise the workspace is **Ready**. Ready means the configured requirements passed, not that every aspect of the application is correct. Shared-use counts and individual dashboard stop/restart warnings cover definitions on this controller only. Removing a workspace never stops or deletes a service.
+
+Project checks allow only `http`, `tcp` and `command`. HTTP uses GET, accepts 200-399 and does not follow redirects. TCP tests connectivity. Command checks test exit success, inherit the controller's environment and overlay `env_file` entries; output is not exposed. Optional `cwd` defaults to the configuration directory, and environment paths are relative to it. Keep credentials in local private files, not commands committed to Git. HTTP headers or a new secret store are not part of this schema.
+
+Checks default to a 30-second interval and 2-second timeout. Intervals must be at least 5 seconds; timeouts must be greater than zero and at most 30 seconds. Health-only fields such as thresholds and initial delay, and fields irrelevant to the selected check type, are rejected even when empty or zero. Results are cached for twice the interval; restart and successful reload discard them. **Check now** schedules configured probes on this controller; it does not accept a new target or command. Four workers bound concurrency. Only the local administrator can configure or trigger these checks; peer grants do not expand these permissions.
+
+Use `stakl workspace list` and `stakl workspace status ID` for read-only inspection. This release does not add cross-host bulk lifecycle, automatic dependency discovery, tunnels, merged logs, workspace check history, or native Proxmox control.
+
 ## HTTPS and headless peers
 
 ### Enable access from the dashboard

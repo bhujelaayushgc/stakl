@@ -615,12 +615,17 @@ export function AppShell() {
     saved = false,
   ) => {
     if (
-      appEditor &&
       editorDirty &&
       !saved &&
-      !window.confirm("Discard your unsaved application changes?")
+      !window.confirm(
+        appEditor
+          ? "Discard your unsaved application changes?"
+          : "Discard your unsaved workspace changes?",
+      )
     )
       return;
+    if (page === "workspaces" && editorDirty)
+      setWorkspaceRevision((n) => n + 1);
     setAppEditor(null);
     setEditorDirty(false);
     writeUrl(
@@ -793,6 +798,8 @@ export function AppShell() {
     )
       return;
     if (page === "config") setConfigDirty(false);
+    if (page === "workspaces" && editorDirty)
+      setWorkspaceRevision((n) => n + 1);
     setEditorDirty(false);
     setAppEditor(null);
     writeUrl(

@@ -191,10 +191,6 @@ func Evaluate(c *config.Config, envelopes []hosts.Envelope, results map[Key]Prob
 					}
 				}
 			}
-			if counts[controller+":"+s.App] > 1 {
-				m.ObservationFresh = false
-				m.State, m.Reason, m.Controllable = "unknown", "Duplicate references resolve to the same service", false
-			}
 			for _, probeID := range sortedKeys(w.Checks) {
 				p := w.Checks[probeID]
 				if p.Service != alias {
@@ -223,14 +219,27 @@ func Evaluate(c *config.Config, envelopes []hosts.Envelope, results map[Key]Prob
 					m.State, m.Reason = "unknown", check.Reason
 				}
 			}
-			if m.State != "ready" {
-				if m.Required {
-					v.RequiredIssues++
-				} else {
-					v.OptionalIssues++
-				}
+			if counts[controller+":"+s.App] > 1 {
+				m.ObservationFresh = false
+				m.State, m.Reason, m.Controllable = "unknown", "Duplicate references resolve to the same service", false
+				v.State = "unknown"
 			}
 			v.Members = append(v.Members, m)
+		}
+		issueRefs := map[string]bool{}
+		for _, m := range v.Members {
+			if m.State == "ready" {
+				continue
+			}
+			ref := canonical(m.Controller, local) + ":" + m.App
+			issueRefs[ref] = issueRefs[ref] || m.Required
+		}
+		for _, required := range issueRefs {
+			if required {
+				v.RequiredIssues++
+			} else {
+				v.OptionalIssues++
+			}
 		}
 		for _, m := range v.Members {
 			if m.Required && m.State == "blocked" {

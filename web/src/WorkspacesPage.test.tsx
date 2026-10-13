@@ -12,6 +12,7 @@ import type { WorkspaceView } from "./workspace-types";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 const view: WorkspaceView = {
@@ -116,6 +117,65 @@ it("shows contextual readiness, optional issues, check origin and service inspec
   fireEvent.click(screen.getByRole("button", { name: "App B (optional)" }));
   expect(onSelect).toHaveBeenCalledWith("app-b");
 });
+it("summarizes the oldest evidence and flags missing observations and checks in the list", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-13T12:00:30Z"));
+  const complete: WorkspaceView = {
+    ...view,
+    id: "complete",
+    name: "Complete",
+    members: [
+      {
+        ...view.members[0],
+        observed_at: "2026-10-13T12:00:10Z",
+        checks: [
+          { ...view.members[0].checks[0], checked_at: "2026-10-13T12:00:15Z" },
+        ],
+      },
+      {
+        ...view.members[1],
+        observed_at: "2026-10-13T12:00:25Z",
+        checks: [
+          { ...view.members[0].checks[0], checked_at: "2026-10-13T12:00:25Z" },
+        ],
+      },
+    ],
+  };
+  const incomplete: WorkspaceView = {
+    ...view,
+    members: view.members.map((m) => ({
+      ...m,
+      checks: m.checks.map((p) => ({
+        ...p,
+        checked_at: "0001-01-01T00:00:00Z",
+      })),
+    })),
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify([complete, incomplete]))),
+  );
+  render(
+    <WorkspacesPage
+      apps={[]}
+      onSelect={vi.fn()}
+      onOpenService={vi.fn()}
+      onOpenConfig={vi.fn()}
+      onDirtyChange={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect(
+    await screen.findByText(
+      "Oldest observation: 20s ago - Oldest project check: 15s ago",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByText(
+      "Oldest observation: Not observed - Oldest project check: Not checked",
+    ),
+  ).toBeVisible();
+});
+
 it("deletes only a workspace definition through revision-protected save", async () => {
   const raw =
     "version: 1\napps: {db: {type: external, detect: {type: tcp, port: 5432}}}\nworkspaces: {app-a: {name: App A, services: {db: {controller: local, app: db}}}, app-b: {name: App B, services: {db: {controller: local, app: db}}}}\n";

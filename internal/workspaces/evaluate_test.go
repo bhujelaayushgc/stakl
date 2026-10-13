@@ -140,3 +140,36 @@ func TestProbeCannotOverrideUnavailableServiceAndExpires(t *testing.T) {
 		t.Fatal(string(b))
 	}
 }
+
+func TestCanonicalDuplicateStaysUnknownDespiteFailedProbeAndCountsOnce(t *testing.T) {
+	now := time.Now().UTC()
+	c, env := fixture(now)
+	w := c.Workspaces["a"]
+	delete(w.Services, "cache")
+	w.Services["again"] = config.WorkspaceService{Controller: localIdentity, App: "db", Condition: "running", Required: true}
+	w.Checks = map[string]config.WorkspaceProbe{"query": {Service: "db", Check: config.WorkspaceCheck{Type: "command", Interval: config.Duration(30 * time.Second)}}}
+	c.Workspaces["a"] = w
+	v := Evaluate(c, env, map[Key]ProbeResult{{"a", "query"}: {CheckedAt: now, OK: false, Message: "Command check failed"}}, now)[0]
+	if v.State != "unknown" || v.RequiredIssues != 1 {
+		t.Fatalf("duplicate service became an executable requirement or counted twice: %+v", v)
+	}
+	for _, m := range v.Members {
+		if m.ObservationFresh || !strings.Contains(m.Reason, "Duplicate") {
+			t.Fatal(m)
+		}
+	}
+}
+
+func TestOptionalCanonicalDuplicateMakesWorkspaceUnknown(t *testing.T) {
+	now := time.Now().UTC()
+	c, env := fixture(now)
+	w := c.Workspaces["a"]
+	delete(w.Services, "cache")
+	w.Services["db"] = config.WorkspaceService{Controller: "local", App: "db", Condition: "running", Required: false}
+	w.Services["again"] = config.WorkspaceService{Controller: localIdentity, App: "db", Condition: "running", Required: false}
+	c.Workspaces["a"] = w
+	v := Evaluate(c, env, nil, now)[0]
+	if v.State != "unknown" || v.RequiredIssues != 0 || v.OptionalIssues != 1 {
+		t.Fatalf("ambiguous optional references did not invalidate readiness: %+v", v)
+	}
+}

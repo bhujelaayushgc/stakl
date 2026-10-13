@@ -172,3 +172,73 @@ it("protects a workspace draft when navigation targets the same workspace page",
   fireEvent.click(screen.getByRole("link", { name: "Applications" }));
   expect(screen.getByLabelText("Workspace name")).toHaveValue("Retain draft");
 });
+
+it("retains a workspace draft when opening logs through the palette is cancelled", async () => {
+  backend();
+  vi.stubGlobal(
+    "confirm",
+    vi.fn(() => false),
+  );
+  history.replaceState({}, "", "/?view=workspaces");
+  render(<AppShell />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create workspace" }),
+  );
+  fireEvent.change(await screen.findByLabelText("Workspace name"), {
+    target: { value: "Retain draft" },
+  });
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+  fireEvent.click(
+    await screen.findByRole("option", { name: "Open API (Local) logs" }),
+  );
+  expect(window.confirm).toHaveBeenCalled();
+  expect(screen.queryByRole("dialog", { name: "API" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Workspace name")).toHaveValue("Retain draft");
+  fireEvent.click(screen.getByRole("link", { name: "Applications" }));
+  expect(screen.getByLabelText("Workspace name")).toHaveValue("Retain draft");
+});
+
+it("dismisses a workspace draft after confirming discard to open logs", async () => {
+  backend();
+  vi.stubGlobal(
+    "confirm",
+    vi.fn(() => true),
+  );
+  history.replaceState({}, "", "/?view=workspaces");
+  render(<AppShell />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create workspace" }),
+  );
+  fireEvent.change(await screen.findByLabelText("Workspace name"), {
+    target: { value: "Discard draft" },
+  });
+  fireEvent.keyDown(window, { key: "k", metaKey: true });
+  fireEvent.click(
+    await screen.findByRole("option", { name: "Open API (Local) logs" }),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "API" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument();
+});
+
+it("dismisses a workspace draft after confirming same-page navigation", async () => {
+  backend();
+  vi.stubGlobal(
+    "confirm",
+    vi.fn(() => true),
+  );
+  history.replaceState({}, "", "/?view=workspaces");
+  render(<AppShell />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create workspace" }),
+  );
+  fireEvent.change(await screen.findByLabelText("Workspace name"), {
+    target: { value: "Discard draft" },
+  });
+  fireEvent.click(screen.getByRole("link", { name: "Workspaces" }));
+  expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Create workspace" }),
+  ).toBeInTheDocument();
+});

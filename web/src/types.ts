@@ -201,6 +201,9 @@ export const canStopApp = (app: App) =>
     (app.config.type === "custom" && !!app.config.stop?.command));
 export const label = (s: string) =>
   ({
+    ready: "Ready",
+    blocked: "Blocked",
+    degraded: "Degraded",
     active: "All running",
     attention: "Needs attention",
     external: "Running externally",
