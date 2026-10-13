@@ -27,13 +27,13 @@ Start and stop services, monitor health status, inspect occupied ports, tail liv
 Running dozens of personal microservices or background workers shouldn't require polluting systemd or launchd. Stakl treats apps as first-class runnable units. Organize them into groups, define start dependency order, and use **Profiles** to bring up entire multi-app stacks (`Core services`, `Full stack`) with a single click or CLI command.
 
 ### Process group supervision that survives restarts
-Every process launch receives a detached Stakl supervisor, an authenticated private Unix socket, and an isolated workload process group. Supervisors stream output directly to rotating disk logs and survive controller exits. When stopping a service, Stakl signals the entire process group gracefully before escalating to KILL: preventing orphaned child processes and eliminating dangerous PID reuse.
+Foreground process and shell launches receive a detached Stakl supervisor, an authenticated private Unix socket, and a separate workload process group. Supervisors stream output directly to rotating disk logs and survive controller exits. When stopping a supervised service, Stakl signals its process group gracefully before escalating to KILL, cleaning up ordinary child processes without signaling reused PIDs. Programs that daemonize or escape the group need a custom runner with explicit start, status, and stop commands; those services use their own lifecycle commands.
 
 ### Gradual adoption: observe without hijacking
 You do not need to rewrite your setup on day one. Discover existing repositories on your filesystem, or use **Observe** in Ports to monitor existing TCP listeners and pre-running Docker Compose containers. Observed services stay under the control of their existing process manager while Stakl provides health monitoring, port mapping, and status visibility.
 
 ### Connect multiple machines over encrypted peer grants
-Run Stakl on your laptop, desktop, and remote build machines. Connect them together through the dashboard over mutual or CA-verified HTTPS. Issue scoped **Read** tokens (inspect status, health, and logs) or **Control** tokens (start, stop, and restart individual apps) without sharing administrative credentials or exposing unprotected endpoints.
+Run Stakl on your laptop, desktop, and remote build machines. Connect them together through the dashboard over HTTPS with server certificate verification and scoped bearer tokens. Issue **Read** tokens (inspect status, health, and logs) or **Control** tokens (start, stop, and restart individual apps) without sharing administrative credentials or exposing unprotected endpoints.
 
 ---
 
@@ -87,7 +87,7 @@ The initial workspace starts clean. After running `stakl`:
 
 1. **Add an application:** In **Applications**, click **Add app**. Choose *Process* (executable with arguments), *Shell* (shell pipelines and redirection), *Docker Compose*, or *Custom*. Set your project directory, command, and group.
 2. **Review and configure:** Set optional HTTP or TCP health checks, declared ports, environment files, and start dependencies. Saving validates the YAML and creates a backup without immediately starting the service.
-3. **Operate and inspect:** Click **Start** on the service row or trigger a profile. Open the details drawer to view live logs, inspect open network ports, or launch an integrated terminal.
+3. **Operate and inspect:** Click **Start** on the service row or trigger a profile. Open the details drawer to view live logs and inspect open network ports. For local apps, **Open terminal** launches an external terminal application in the project directory on the controller machine.
 
 For existing repositories, click **Discover apps** and use **Browse** to scan host directories for recognized package and Compose files. See [adding and editing apps](docs/configuration.md#add-and-edit-apps-in-the-dashboard) and [gradual adoption](docs/configuration.md#gradual-adoption-of-existing-services).
 
@@ -102,7 +102,7 @@ For existing repositories, click **Discover apps** and use **Browse** to scan ho
 
 ![Stakl live log inspection panel](docs/images/logs.png)
 
-*Real-time log streaming powered by detached supervisors. Filter by stdout or stderr, search with instant highlighting, toggle line timestamps and wrapping, pause streams, and download retained logs.*
+*Real-time log streaming powered by detached supervisors. Filter by stdout or stderr and by text, toggle line timestamps and wrapping, pause streams, and download retained logs.*
 
 </details>
 
@@ -263,7 +263,7 @@ stakl config validate                # Check YAML syntax and schema without star
 stakl config path                    # Print active configuration file path
 stakl config reload                  # Reload running controller configuration
 stakl backup                         # Create a consistent SQLite state snapshot
-stakl reset-state --yes              # Reset runtime history while preserving YAML and logs
+stakl reset-state --yes              # Delete runtime state, host connections, and peer grants
 
 # Peer access and TLS
 stakl tls init --host peer.example   # Generate TLS certificates for remote access
@@ -274,11 +274,13 @@ stakl peer tokens revoke GRANT_ID
 
 Operational commands communicate with the running controller's authenticated API. `config validate`, `config path`, and `tls init` run offline without an active controller. See [HTTPS and headless setup](docs/configuration.md#https-and-headless-peers) for remote controller administration.
 
+Before using `reset-state`, back up your workspace and stop the managed services and controller. It deletes `state.db`, including runtime history, saved host connections, issued peer grants, and controller identity. YAML configuration, logs, and project directories remain intact; peer connections must be set up again after a reset.
+
 ---
 
 ## Build and run
 
-Building requires Go 1.26.9+ and Node.js 22.x, 24.x, or 26+. The compiled output is a self-contained binary containing all frontend assets: neither Go nor Node.js is required at runtime.
+Building requires Go 1.26.9+ and Node.js 22.22.2+ (22.x), 24.15.0+ (24.x), or 26+. The compiled output is a self-contained binary containing all frontend assets: neither Go nor Node.js is required at runtime.
 
 ```sh
 git clone https://github.com/bhujelaayushgc/stakl.git
@@ -302,9 +304,9 @@ Configuration resolution order: `--config`, `STAKL_CONFIG`, then `~/.stakl/confi
 
 ## Architecture and safety
 
-- **Detached supervisors:** Workloads execute under a detached supervisor with private authenticated sockets. The controller never blindly sends signals to cached PIDs: it validates ownership records before issuing shutdown commands.
-- **Process group cleanup:** Graceful shutdown signals the entire process group. The supervisor holds the parent process with `waitid(..., WNOWAIT)` until child members exit, preventing PID recycling races.
-- **Loopback isolation:** Stakl binds to `127.0.0.1` by default. Browser requests use SameSite, HttpOnly authentication cookies with origin checks and mutation headers. Non-loopback binding requires explicit tokens and TLS encryption.
+- **Detached supervisors:** Foreground process and shell workloads execute under a detached supervisor with private authenticated sockets. The controller never blindly sends signals to cached PIDs: it validates ownership records before issuing shutdown commands. Command-managed custom services use their configured lifecycle commands.
+- **Process group cleanup:** Graceful shutdown of supervised workloads signals the entire process group. The supervisor holds the parent process with `waitid(..., WNOWAIT)` until remaining group members are cleaned up, preventing PID recycling races. Processes that escape the group require custom lifecycle commands.
+- **Loopback isolation:** Stakl binds to `127.0.0.1` by default. Browser requests use SameSite, HttpOnly authentication cookies with origin checks and mutation headers. Non-loopback binding requires an administration token of at least 32 characters. TLS is optional on the primary listener; configure it explicitly before exposing that listener remotely.
 - **Gradual observation:** External processes (`type: external` or detected TCP listeners) are protected. Stakl monitors availability without acquiring process kill rights.
 
 For deeper architectural details, see [architecture documentation](docs/architecture.md) and [REST/SSE API](docs/api.md).
