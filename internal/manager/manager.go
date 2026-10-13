@@ -20,12 +20,18 @@ import (
 	"time"
 )
 
+type HealthObservation struct {
+	Time time.Time `json:"time"`
+	OK   bool      `json:"ok"`
+}
 type AppView struct {
-	EffectiveConfig config.App         `json:"effective_config"`
-	Config          config.App         `json:"config"`
-	Runtime         runner.Runtime     `json:"runtime"`
-	Containers      []runner.Container `json:"containers"`
-	Ports           map[int]bool       `json:"ports"`
+	ObservedAt        time.Time          `json:"observed_at"`
+	HealthObservation *HealthObservation `json:"health_observation,omitempty"`
+	EffectiveConfig   config.App         `json:"effective_config"`
+	Config            config.App         `json:"config"`
+	Runtime           runner.Runtime     `json:"runtime"`
+	Containers        []runner.Container `json:"containers"`
+	Ports             map[int]bool       `json:"ports"`
 }
 type tracked struct {
 	Runtime             runner.Runtime

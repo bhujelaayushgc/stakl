@@ -192,10 +192,11 @@ type Config struct {
 	Terminal struct {
 		Command string `yaml:"command" json:"command"`
 	} `yaml:"terminal" json:"terminal"`
-	Notifications bool               `yaml:"notifications" json:"notifications"`
-	Groups        map[string]Group   `yaml:"groups" json:"groups"`
-	Profiles      map[string]Profile `yaml:"profiles" json:"profiles"`
-	Apps          map[string]App     `yaml:"apps" json:"apps"`
+	Notifications bool                 `yaml:"notifications" json:"notifications"`
+	Groups        map[string]Group     `yaml:"groups" json:"groups"`
+	Profiles      map[string]Profile   `yaml:"profiles" json:"profiles"`
+	Apps          map[string]App       `yaml:"apps" json:"apps"`
+	Workspaces    map[string]Workspace `yaml:"workspaces,omitempty" json:"workspaces"`
 	GlobalActions struct {
 		Exclude []string `yaml:"exclude" json:"exclude"`
 	} `yaml:"global_actions" json:"global_actions"`
@@ -483,6 +484,9 @@ func Parse(b []byte, base string) (*Config, error) {
 		if _, ok := c.Apps[id]; !ok {
 			return nil, fmt.Errorf("global_actions.exclude: missing app %q", id)
 		}
+	}
+	if err := c.validateWorkspaces(base); err != nil {
+		return nil, err
 	}
 	return &c, nil
 }
