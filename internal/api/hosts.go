@@ -23,11 +23,7 @@ func (s *Server) hostRoutes(mux *http.ServeMux) {
 		JSON(w, descriptions)
 	})
 	mux.HandleFunc("GET /api/hosts/apps", func(w http.ResponseWriter, r *http.Request) {
-		snapshots := []hosts.Envelope{{Host: s.localHost(), Groups: s.Manager.Config().Groups, Apps: s.Manager.Views()}}
-		if s.Hosts != nil {
-			snapshots = append(snapshots, s.Hosts.Snapshots()...)
-		}
-		JSON(w, snapshots)
+		JSON(w, s.hostSnapshots())
 	})
 	mux.HandleFunc("POST /api/hosts", func(w http.ResponseWriter, r *http.Request) {
 		if !s.requireHosts(w) {
@@ -93,6 +89,14 @@ func (s *Server) hostRoutes(mux *http.ServeMux) {
 	for _, action := range []string{"start", "stop", "restart"} {
 		mux.HandleFunc("POST /api/hosts/{host}/apps/{app}/"+action, func(w http.ResponseWriter, r *http.Request) { r.SetPathValue("action", action); s.hostAction(w, r) })
 	}
+}
+
+func (s *Server) hostSnapshots() []hosts.Envelope {
+	snapshots := []hosts.Envelope{{Host: s.localHost(), Groups: s.Manager.Config().Groups, Apps: s.Manager.Views()}}
+	if s.Hosts != nil {
+		snapshots = append(snapshots, s.Hosts.Snapshots()...)
+	}
+	return snapshots
 }
 
 func (s *Server) localHost() hosts.Description {

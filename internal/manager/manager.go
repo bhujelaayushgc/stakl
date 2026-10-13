@@ -39,6 +39,8 @@ type tracked struct {
 	Containers          []runner.Container
 	Ports               map[int]bool
 	LastCheck           time.Time
+	ObservedAt          time.Time
+	HealthObservation   *HealthObservation
 	Failures, Successes int
 	LogLaunch           string
 	RecoveryError       string
@@ -199,7 +201,12 @@ func (m *Manager) Views() []AppView {
 		for p, open := range t.Ports {
 			ports[p] = open
 		}
-		out = append(out, AppView{Config: config.Redacted(a), EffectiveConfig: config.Redacted(t.Effective), Runtime: t.Runtime, Containers: append([]runner.Container{}, t.Containers...), Ports: ports})
+		var observation *HealthObservation
+		if t.HealthObservation != nil {
+			copy := *t.HealthObservation
+			observation = &copy
+		}
+		out = append(out, AppView{ObservedAt: t.ObservedAt, HealthObservation: observation, Config: config.Redacted(a), EffectiveConfig: config.Redacted(t.Effective), Runtime: t.Runtime, Containers: append([]runner.Container{}, t.Containers...), Ports: ports})
 	}
 	return out
 }
@@ -375,6 +382,15 @@ func (m *Manager) refresh(id string) {
 	oldState := t.Runtime.State
 	detailsChanged := !reflect.DeepEqual(t.Containers, st.Containers) || !reflect.DeepEqual(t.Ports, ports)
 	t.LastCheck = time.Now()
+	if e == nil {
+		t.ObservedAt = t.LastCheck.UTC()
+	} else {
+		t.ObservedAt = time.Time{}
+	}
+	t.HealthObservation = nil
+	if h != nil && e == nil {
+		t.HealthObservation = &HealthObservation{Time: h.Time, OK: h.OK}
+	}
 	t.Containers = st.Containers
 	t.Ports = ports
 	t.Runtime.State = newState
@@ -690,6 +706,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 	cancel()
 	if st.Running {
 		m.mu.Lock()
+		t.ObservedAt, t.HealthObservation = time.Time{}, nil
 		t.Runtime.State = "external"
 		t.Runtime.Owned = r.Owned || st.State.ID != ""
 		if t.Runtime.Owned {
@@ -706,6 +723,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 		h := health.Check(ctx, a.Detect, a, r, nil)
 		if h.OK {
 			m.mu.Lock()
+			t.ObservedAt, t.HealthObservation = time.Time{}, nil
 			t.Runtime.State = "external"
 			t.Runtime.Owned = false
 			m.save(id, t)
@@ -721,6 +739,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 	}
 	m.mu.Lock()
 	t.Runtime.State = "starting"
+	t.ObservedAt, t.HealthObservation = time.Time{}, nil
 	t.Runtime.Error = ""
 	t.Runtime.NextRestart = nil
 	t.Effective = a
@@ -787,6 +806,7 @@ func (m *Manager) stopOne(ctx context.Context, id string, force bool) error {
 		return nil
 	}
 	t.Runtime.State = "stopping"
+	t.ObservedAt, t.HealthObservation = time.Time{}, nil
 	m.mu.Unlock()
 	m.event("app.stopping", id, a.Name+" is stopping")
 	stopCtx, cancel := context.WithTimeout(ctx, a.Stop.Timeout.Value()+15*time.Second)
@@ -962,6 +982,9 @@ func (m *Manager) Reload() error {
 					t.Failures, t.Successes = 0, 0
 					t.Containers = nil
 					t.Ports = map[int]bool{}
+				}
+				if !reflect.DeepEqual(t.Effective, a) {
+					t.ObservedAt, t.HealthObservation = time.Time{}, nil
 				}
 				t.Effective = a
 				t.LastCheck = time.Time{}
