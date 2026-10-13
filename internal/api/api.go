@@ -43,6 +43,7 @@ type Server struct {
 	saveMu                  sync.Mutex
 	ControllerID            string
 	controllerOnce          sync.Once
+	workspaceOnce           sync.Once
 	controllerErr           error
 	peerMu                  sync.Mutex
 	peerStreams             map[string]map[*peerStream]struct{}
@@ -70,9 +71,11 @@ func (s *Server) initController() {
 }
 func (s *Server) Handler() http.Handler {
 	s.initController()
-	if s.Workspaces == nil {
-		s.Workspaces = workspaces.New(s.Manager.Config, s.hostSnapshots)
-	}
+	s.workspaceOnce.Do(func() {
+		if s.Workspaces == nil {
+			s.Workspaces = workspaces.New(s.Manager.Config, s.hostSnapshots)
+		}
+	})
 	mux := http.NewServeMux()
 	s.peerRoutes(mux)
 	s.hostRoutes(mux)

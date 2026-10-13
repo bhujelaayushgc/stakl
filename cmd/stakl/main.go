@@ -246,8 +246,11 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	s.PeerAccess = peeraccess.New(filepath.Join(dir, "peer-access.json"), s.PeerHandler)
 	defer s.PeerAccess.Close()
 	hostRegistry.Start(serverCtx)
+	handler := s.Handler()
+	s.Workspaces.Start(serverCtx, m.Bus)
+	defer s.Workspaces.Close()
 	server := &http.Server{
-		Handler:           s.Handler(),
+		Handler:           handler,
 		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -287,6 +290,7 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	serverCancel()
 	s.CancelPeerStreams()
 	hostRegistry.Close()
+	s.Workspaces.Close()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if e := server.Shutdown(shutdownCtx); e != nil {
 		_ = server.Close()

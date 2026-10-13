@@ -3,8 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bhujelaayushgc/stakl/internal/config"
 	"github.com/bhujelaayushgc/stakl/internal/workspaces"
@@ -42,5 +45,67 @@ func TestWorkspaceReadsAreAdminOnlyAndSanitized(t *testing.T) {
 		if w.Code == http.StatusOK {
 			t.Fatal(path)
 		}
+	}
+}
+
+func TestWorkspaceCheckSchedulesOnlyConfiguredAdminProbes(t *testing.T) {
+	s, h := peerFixture(t)
+	c, err := config.Parse([]byte(`version: 1
+apps: {}
+workspaces:
+  project:
+    name: Project
+    services: {db: {controller: local, app: missing}}
+    checks:
+      query: {service: db, check: {type: command, command: 'touch workspace-checked'}}
+`), s.Manager.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Manager.Config().Workspaces = c.Workspaces
+	s.Workspaces.Start(t.Context(), s.Manager.Bus)
+	t.Cleanup(s.Workspaces.Close)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Workspaces.Views()[0].Members[0].Checks[0].State == "ready" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.Remove(filepath.Join(s.Manager.Dir, "workspace-checked")); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := issuePeer(t, h, "control")
+	for _, credential := range []string{"", token} {
+		if w := peerRequest(h, "POST", "/api/workspaces/project/check", credential, "", ""); w.Code != 401 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	if w := peerRequest(h, "POST", "/api/workspaces/project/check", "admin", "", `{"command":"touch unconfigured"}`); w.Code != 400 {
+		t.Fatal("accepted request-supplied probe", w.Code, w.Body.String())
+	}
+	w := peerRequest(h, "POST", "/api/workspaces/project/check", "admin", "", "")
+	if w.Code != http.StatusAccepted {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(s.Manager.Dir, "workspace-checked")); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(s.Manager.Dir, "workspace-checked")); err != nil {
+		t.Fatal("configured check did not run")
+	}
+	if _, err := os.Stat(filepath.Join(s.Manager.Dir, "unconfigured")); !os.IsNotExist(err) {
+		t.Fatal("arbitrary request command ran")
+	}
+	v, _ := s.Manager.View("a")
+	if v.Runtime.State != "stopped" {
+		t.Fatal("probe operated on app", v.Runtime)
+	}
+	if w := peerRequest(h, "POST", "/api/workspaces/nope/check", "admin", "", ""); w.Code != 404 {
+		t.Fatal(w.Code)
 	}
 }
