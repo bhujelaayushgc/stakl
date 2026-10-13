@@ -25,6 +25,14 @@ export type AppDraft = {
   rowErrors?: Record<string, string>;
 };
 export class UnsafeAppSourceError extends Error {}
+// Shared source-preserving primitives for editors of other config sections.
+export {
+  document as configurationDocument,
+  sourcePath as configurationSourcePath,
+  scalarString as configurationScalarString,
+  safe as assertSafeConfigurationNode,
+  patch as patchConfiguration,
+};
 const types = new Set([
   "process",
   "shell",

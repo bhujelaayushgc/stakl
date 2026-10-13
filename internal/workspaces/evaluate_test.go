@@ -52,6 +52,9 @@ func TestReadinessPrecedenceAndFreshness(t *testing.T) {
 			if got.State != tt.want {
 				t.Fatalf("got %+v, want %s", got, tt.want)
 			}
+			if tt.name == "stopped" && !got.Members[1].ObservationFresh {
+				t.Fatal("fresh stopped observation cannot be inspected for start controls")
+			}
 		})
 	}
 	c, env := fixture(now)

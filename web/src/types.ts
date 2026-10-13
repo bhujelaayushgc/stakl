@@ -45,6 +45,8 @@ export interface Runtime {
   next_restart?: string;
 }
 export interface App {
+  observed_at?: string;
+  health_observation?: { time: string; ok: boolean };
   host?: HostDescription;
   config: AppConfig;
   effective_config?: AppConfig;
@@ -152,6 +154,16 @@ export interface Config {
   error: string;
   groups: Record<string, { name: string; order: number }>;
   profiles: Record<string, Profile>;
+  workspaces?: Record<
+    string,
+    {
+      name: string;
+      services: Record<
+        string,
+        { controller: string; app: string; required?: boolean }
+      >;
+    }
+  >;
   raw?: string;
   revision?: string;
 }

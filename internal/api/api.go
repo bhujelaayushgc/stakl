@@ -243,7 +243,7 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	c := s.Manager.Config()
-	response := map[string]any{"path": s.Manager.ConfigPath, "error": s.Manager.Error(), "groups": c.Groups, "profiles": c.Profiles, "logging": c.Logging}
+	response := map[string]any{"path": s.Manager.ConfigPath, "error": s.Manager.Error(), "groups": c.Groups, "profiles": c.Profiles, "logging": c.Logging, "workspaces": c.Workspaces}
 	if r.URL.Query().Get("raw") == "true" {
 		b, e := os.ReadFile(s.Manager.ConfigPath)
 		if e != nil {

@@ -37,20 +37,21 @@ type Use struct {
 	Required bool   `json:"required"`
 }
 type Member struct {
-	Alias        string             `json:"alias"`
-	Controller   string             `json:"controller"`
-	App          string             `json:"app"`
-	Name         string             `json:"name"`
-	Condition    string             `json:"condition"`
-	Required     bool               `json:"required"`
-	State        string             `json:"state"`
-	Reason       string             `json:"reason"`
-	RuntimeState string             `json:"runtime_state"`
-	ObservedAt   time.Time          `json:"observed_at"`
-	Host         *hosts.Description `json:"host,omitempty"`
-	Controllable bool               `json:"controllable"`
-	Uses         []Use              `json:"uses"`
-	Checks       []Probe            `json:"checks"`
+	Alias            string             `json:"alias"`
+	Controller       string             `json:"controller"`
+	App              string             `json:"app"`
+	Name             string             `json:"name"`
+	Condition        string             `json:"condition"`
+	Required         bool               `json:"required"`
+	State            string             `json:"state"`
+	Reason           string             `json:"reason"`
+	RuntimeState     string             `json:"runtime_state"`
+	ObservedAt       time.Time          `json:"observed_at"`
+	ObservationFresh bool               `json:"observation_fresh"`
+	Host             *hosts.Description `json:"host,omitempty"`
+	Controllable     bool               `json:"controllable"`
+	Uses             []Use              `json:"uses"`
+	Checks           []Probe            `json:"checks"`
 }
 type View struct {
 	ID             string   `json:"id"`
@@ -130,8 +131,10 @@ func memberObservation(m *Member, app manager.AppView, now time.Time) {
 		m.Reason = "Service observation is missing, stale or has an invalid clock; update older peers if needed"
 		return
 	}
+	m.ObservationFresh = true
 	switch app.Runtime.State {
 	case "starting", "stopping", "unknown", "":
+		m.ObservationFresh = false
 		m.Reason = "Service state is transitional or unknown"
 		return
 	case "running", "healthy", "unhealthy", "external":
@@ -189,6 +192,7 @@ func Evaluate(c *config.Config, envelopes []hosts.Envelope, results map[Key]Prob
 				}
 			}
 			if counts[controller+":"+s.App] > 1 {
+				m.ObservationFresh = false
 				m.State, m.Reason, m.Controllable = "unknown", "Duplicate references resolve to the same service", false
 			}
 			for _, probeID := range sortedKeys(w.Checks) {
