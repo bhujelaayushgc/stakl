@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import YAML from "yaml";
@@ -224,4 +225,188 @@ it("deletes only a workspace definition through revision-protected save", async 
   expect(calls.some((p) => /\/apps\/.*\/(start|stop|restart)/.test(p))).toBe(
     false,
   );
+});
+
+const managedView: WorkspaceView = {
+  ...view,
+  revision: "fixture-revision:1",
+  members: [
+    {
+      ...view.members[0],
+      name: "API",
+      app: "api",
+      runtime_state: "stopped",
+      observation_fresh: true,
+      actions: { start: true, stop: false, reason: "" },
+    },
+    {
+      ...view.members[1],
+      actions: {
+        start: false,
+        stop: false,
+        reason: "Controller is not registered",
+      },
+    },
+  ],
+};
+
+it("starts a workspace and shows each service outcome without inventing readiness", async () => {
+  const actions: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, options?: RequestInit) => {
+      if (options?.method === "POST") {
+        actions.push(path);
+        return new Response(
+          JSON.stringify({
+            workspace: "app-a",
+            action: "start",
+            results: [
+              {
+                alias: "db",
+                name: "API",
+                controller: "local",
+                app: "api",
+                action: "start",
+                status: "started",
+                message: "Start completed; readiness is checked separately",
+              },
+              {
+                alias: "cache",
+                name: "Cache",
+                controller: "remote",
+                app: "cache",
+                action: "start",
+                status: "skipped",
+                message: "Controller is not registered",
+              },
+            ],
+          }),
+        );
+      }
+      return new Response(JSON.stringify([managedView]));
+    }),
+  );
+  const onSaved = vi.fn();
+  render(
+    <WorkspacesPage
+      apps={[]}
+      workspaceID="app-a"
+      onSelect={vi.fn()}
+      onOpenService={vi.fn()}
+      onOpenConfig={vi.fn()}
+      onDirtyChange={vi.fn()}
+      onSaved={onSaved}
+    />,
+  );
+  fireEvent.click(
+      await screen.findByRole("button", { name: "Start workspace" }),
+  );
+  const results = await screen.findByRole("region", {
+    name: "Workspace action results",
+  });
+  expect(within(results).getByText("API")).toBeVisible();
+  expect(within(results).getByText("Started")).toBeVisible();
+  expect(within(results).getByText("Skipped")).toBeVisible();
+  expect(actions).toEqual(["/api/workspaces/app-a/start"]);
+  expect(onSaved).toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Start Cache" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Stop Cache" })).toBeDisabled();
+});
+
+it.each([false, true])(
+  "requires shared-stop confirmation and respects the answer %s",
+  async (confirmed) => {
+    const calls: { path: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => confirmed),
+    );
+    const running = {
+      ...managedView,
+      members: [
+        {
+          ...managedView.members[0],
+          runtime_state: "running",
+          actions: { start: false, stop: true, reason: "Already running" },
+        },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, options?: RequestInit) => {
+        if (options?.method === "POST") {
+          calls.push({ path, body: JSON.parse(String(options.body)) });
+          return new Response(
+            JSON.stringify({
+              workspace: "app-a",
+              action: "stop",
+              results: [
+                {
+                  alias: "db",
+                  name: "API",
+                  action: "stop",
+                  status: "stopped",
+                  message: "Stop completed",
+                },
+              ],
+            }),
+          );
+        }
+        return new Response(JSON.stringify([running]));
+      }),
+    );
+    render(
+      <WorkspacesPage
+        apps={[]}
+        workspaceID="app-a"
+        onSelect={vi.fn()}
+        onOpenService={vi.fn()}
+        onOpenConfig={vi.fn()}
+        onDirtyChange={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stop API" }));
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("App B (optional)"),
+    );
+    if (confirmed) {
+      await screen.findByRole("region", { name: "Workspace action results" });
+      expect(calls).toEqual([
+        {
+          path: "/api/workspaces/app-a/members/db/stop",
+          body: { revision: "fixture-revision:1", confirm_shared: true },
+        },
+      ]);
+    } else expect(calls).toHaveLength(0);
+  },
+);
+
+it("reports unknown network outcomes and refreshes instead of retrying the action", async () => {
+  let attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_path: string, options?: RequestInit) => {
+      if (options?.method === "POST") {
+        attempts++;
+        throw Error("network lost");
+      }
+      return new Response(JSON.stringify([managedView]));
+    }),
+  );
+  render(
+    <WorkspacesPage
+      apps={[]}
+      workspaceID="app-a"
+      onSelect={vi.fn()}
+      onOpenService={vi.fn()}
+      onOpenConfig={vi.fn()}
+      onDirtyChange={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Start API" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Outcome unknown");
+  expect(attempts).toBe(1);
 });

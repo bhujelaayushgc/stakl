@@ -11,6 +11,7 @@ import (
 )
 
 func (s *Server) workspaceRoutes(mux *http.ServeMux) {
+	s.workspaceActionRoutes(mux)
 	mux.HandleFunc("POST /api/workspaces/{id}/check", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		var payload map[string]json.RawMessage

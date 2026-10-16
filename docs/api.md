@@ -37,7 +37,7 @@ SSE events contain `type`, optional `app`, `message`, and `time`. Clients refres
 
 ## Project workspaces
 
-These routes require the local administrator session. Peer Read and Control tokens cannot read workspace definitions or schedule their checks.
+These routes require the local administrator session. Peer Read and Control tokens cannot read workspace definitions, schedule their checks, or invoke workspace actions. Connected-host actions use the administrator's existing peer registration and grants.
 
 | Method | Route | Contract |
 | --- | --- | --- |
@@ -45,8 +45,15 @@ These routes require the local administrator session. Peer Read and Control toke
 | GET | `/api/workspaces/:id` | One workspace; missing IDs return 404 |
 | GET | `/api/workspaces/impact?controller=local&app=postgres` | Known required/optional uses in this controller's definitions; accepts a stable controller identity for remote services |
 | POST | `/api/workspaces/:id/check` | Empty body or `{}`; 202 schedules configured probes, coalescing pending work. Request-supplied settings are rejected |
+| POST | `/api/workspaces/:id/start` | Start eligible stopped members; report a result for every member, including skipped and already-running services |
+| POST | `/api/workspaces/:id/members/:alias/start` | Start one eligible member through its defining controller |
+| POST | `/api/workspaces/:id/members/:alias/stop` | Stop one eligible member; shared services require `confirm_shared: true` |
 
-GET requests read cached evidence. Checks run on the workspace controller with four workers, never on the browser or an arbitrary peer. Check responses omit commands, targets, environment files and output. Results expire and begin unknown after controller restart or successful configuration reload. Workspace definitions use the existing revision-protected config APIs; no workspace lifecycle endpoint exists. Deleting a definition leaves its services intact.
+GET requests read cached evidence. Checks run on the workspace controller with four workers, never on the browser or an arbitrary peer. Check responses omit commands, targets, environment files and output. Results expire and begin unknown after controller restart or successful configuration reload. Workspace definitions use the existing revision-protected config APIs. Deleting a definition leaves its services intact.
+
+Member `actions: {start, stop, reason}` describes lifecycle eligibility independently of readiness checks. Views include an opaque `revision`; send it in action requests, for example `{"revision":"<view revision>"}` or `{"revision":"<view revision>","confirm_shared":true}`, to reject stale visible definitions with 409. The dashboard always sends this precondition. Empty bodies and `{}` deliberately operate on the current definition. Arbitrary targets, commands and other execution settings are rejected. Shared-stop confirmation covers known workspace references on this controller, not actual users or private workspaces on another controller.
+
+Action responses contain `{workspace, action, results:[{alias,controller,app,name,action,status,message}]}`. Status is `started`, `stopped`, `already_running`, `skipped`, `failed`, or `outcome_unknown`; diagnostics omit command output and raw upstream errors. A failure does not roll back successful starts. Overlapping actions on the same workspace return 409. Existing app dependencies are honored by their controller and may include apps outside the workspace; workspace membership adds no cross-controller dependency ordering. Config changes stop remaining dispatches, and remote registrations are checked against their stable controller identity. Network loss can leave partial results: inspect current state before deciding whether to retry an uncertain action. Workspace Start schedules configured checks after dispatch, while readiness continues to depend on fresh observations. There is no workspace-wide Stop endpoint.
 
 App views include additive `observed_at` and optional `health_observation: {time, ok}` fields. Recovered runtime metadata alone does not establish freshness. Older peers without these fields remain usable in Applications; their workspace requirements remain unknown. Workspace members expose `observation_fresh` independently of failing project checks so individual service controls can respect freshness without treating a failed probe as lost ownership.
 

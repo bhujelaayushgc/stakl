@@ -50,10 +50,12 @@ type Member struct {
 	ObservationFresh bool               `json:"observation_fresh"`
 	Host             *hosts.Description `json:"host,omitempty"`
 	Controllable     bool               `json:"controllable"`
+	Actions          Actions            `json:"actions"`
 	Uses             []Use              `json:"uses"`
 	Checks           []Probe            `json:"checks"`
 }
 type View struct {
+	Revision       string   `json:"revision"`
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
 	Description    string   `json:"description"`
@@ -186,6 +188,7 @@ func Evaluate(c *config.Config, envelopes []hosts.Envelope, results map[Key]Prob
 					for _, a := range e.Apps {
 						if a.Config.ID == s.App {
 							memberObservation(&m, a, now)
+							m.Actions = memberActions(m, a)
 							break
 						}
 					}
@@ -222,7 +225,11 @@ func Evaluate(c *config.Config, envelopes []hosts.Envelope, results map[Key]Prob
 			if counts[controller+":"+s.App] > 1 {
 				m.ObservationFresh = false
 				m.State, m.Reason, m.Controllable = "unknown", "Duplicate references resolve to the same service", false
+				m.Actions = Actions{Reason: m.Reason}
 				v.State = "unknown"
+			}
+			if !m.Actions.Start && !m.Actions.Stop && m.Actions.Reason == "" {
+				m.Actions.Reason = m.Reason
 			}
 			v.Members = append(v.Members, m)
 		}

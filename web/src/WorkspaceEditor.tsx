@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { isMap } from "yaml";
 import { request, RequestError, type App, type Config } from "./types";
-import { validConfigID } from "./app-config";
+import {
+  availableID,
+  configurationDocument,
+  configurationScalarString,
+  validConfigID,
+} from "./app-config";
 import {
   buildWorkspaceConfiguration,
   createWorkspaceDraft,
@@ -11,6 +17,7 @@ import {
   type WorkspaceDraft,
 } from "./workspace-config";
 import { PageHeader } from "./ui";
+import { ServicePicker } from "./ServicePicker";
 import "./app-editor.css";
 import "./workspaces.css";
 
@@ -77,6 +84,8 @@ export function WorkspaceEditor({
     [busy, setBusy] = useState(false),
     [conflict, setConflict] = useState(false),
     [loading, setLoading] = useState(true);
+  const [customID, setCustomID] = useState(false),
+    [workspaceIDs, setWorkspaceIDs] = useState<string[]>([]);
   const [external, setExternal] = useState<{
     id: string;
     name: string;
@@ -86,6 +95,7 @@ export function WorkspaceEditor({
     url: string;
   } | null>(null);
   const saving = useRef(false),
+    customAliases = useRef(new Set<string>()),
     errorRef = useRef<HTMLDivElement>(null);
   const dirty =
     !!original &&
@@ -100,12 +110,24 @@ export function WorkspaceEditor({
     setSource(null);
     setDraft(null);
     setExternal(null);
+    setCustomID(false);
+    customAliases.current.clear();
     request<Config>("/config?raw=true", undefined, controller.signal)
       .then((current) => {
         if (controller.signal.aborted) return;
         const initial = workspaceID
           ? loadWorkspaceDraft(current.raw || "", workspaceID)
           : createWorkspaceDraft();
+        customAliases.current = new Set(Object.keys(initial.values.services));
+        const workspaces = configurationDocument(current.raw || "").get(
+          "workspaces",
+          true,
+        );
+        setWorkspaceIDs(
+          isMap(workspaces)
+            ? workspaces.items.map(({ key }) => configurationScalarString(key))
+            : [],
+        );
         setSource(current);
         setOriginal(initial);
         setDraft(initial);
@@ -147,13 +169,22 @@ export function WorkspaceEditor({
   };
   const discard = () =>
     !dirty || window.confirm("Discard your unsaved workspace changes?");
-  const updateMember = (index: number, alias: string, s: ServiceDefinition) => {
+  const updateMember = (
+    index: number,
+    alias: string,
+    s: ServiceDefinition,
+    manualAlias = false,
+  ) => {
     if (!draft) return;
     const entries = Object.entries(draft.values.services);
     const previous = entries[index][0];
     if (alias !== previous && Object.hasOwn(draft.values.services, alias)) {
       setError("This member alias already exists");
       return;
+    }
+    if (manualAlias || customAliases.current.has(previous)) {
+      customAliases.current.delete(previous);
+      customAliases.current.add(alias);
     }
     entries[index] = [alias, s];
     const checks = Object.fromEntries(
@@ -173,7 +204,11 @@ export function WorkspaceEditor({
   };
   const addMember = (a: App) => {
     if (!draft) return;
-    const alias = uniqueID(a.config.id, draft.values.services);
+    const alias = availableID(
+      a.config.name || a.config.id,
+      Object.keys(draft.values.services),
+      "service",
+    );
     change({
       ...draft,
       values: {
@@ -240,7 +275,11 @@ export function WorkspaceEditor({
             : { type: "http", url: external.url },
       },
     };
-    const alias = uniqueID(external.id, draft.values.services);
+    const alias = availableID(
+      external.name,
+      Object.keys(draft.values.services),
+      "service",
+    );
     change({
       ...draft,
       externalApps: [...(draft.externalApps || []), app],
@@ -292,11 +331,13 @@ export function WorkspaceEditor({
   const options = apps.map((a) => ({
     ref: choice(a),
     name: `${a.host?.name || "Local"} / ${a.config.name}`,
+    aliasName: a.config.name || a.config.id,
   }));
   for (const a of draft?.externalApps || [])
     options.push({
       ref: { controller: "local", app: a.id },
       name: `Local / ${String(a.values.name)} (new external service)`,
+      aliasName: String(a.values.name || a.id),
     });
   const available = apps.find(
     (a) =>
@@ -349,14 +390,24 @@ export function WorkspaceEditor({
                 label="Workspace name"
                 value={draft.values.name}
                 onChange={(name) =>
-                  change({ ...draft, values: { ...draft.values, name } })
+                  change({
+                    ...draft,
+                    id:
+                      !workspaceID && !customID
+                        ? availableID(name, workspaceIDs, "workspace")
+                        : draft.id,
+                    values: { ...draft.values, name },
+                  })
                 }
               />
               <Field
                 label="Workspace ID"
                 value={draft.id}
                 readOnly={!!workspaceID}
-                onChange={(id) => change({ ...draft, id })}
+                onChange={(id) => {
+                  setCustomID(true);
+                  change({ ...draft, id });
+                }}
               />
             </div>
             <label className="app-field">
@@ -391,60 +442,71 @@ export function WorkspaceEditor({
                     <fieldset className="workspace-form-row" key={index}>
                       <legend>Service requirement {index + 1}</legend>
                       <div className="app-field-grid">
+                        <ServicePicker
+                          label={`Service ${index + 1}`}
+                          value={ref}
+                          options={[
+                            ...(!known
+                              ? [
+                                  {
+                                    value: ref,
+                                    label: `Unavailable / ${s.app} (${s.controller})`,
+                                    detail: s.app,
+                                    disabled: true,
+                                  },
+                                ]
+                              : []),
+                            ...options.map((o) => ({
+                              value: reference(o.ref, localIdentity),
+                              label: o.name,
+                              detail: o.ref.app,
+                              disabled: Object.entries(
+                                draft.values.services,
+                              ).some(
+                                ([a, other]) =>
+                                  a !== alias &&
+                                  reference(other, localIdentity) ===
+                                    reference(o.ref, localIdentity),
+                              ),
+                            })),
+                          ]}
+                          onChange={(value) => {
+                            const [controller, app] = JSON.parse(
+                              value,
+                            ) as string[];
+                            const a = apps.find(
+                              (a) =>
+                                reference(choice(a), localIdentity) === value,
+                            );
+                            const nextAlias = customAliases.current.has(alias)
+                              ? alias
+                              : availableID(
+                                  options.find(
+                                    (o) =>
+                                      reference(o.ref, localIdentity) === value,
+                                  )?.aliasName || app,
+                                  Object.keys(draft.values.services).filter(
+                                    (id) => id !== alias,
+                                  ),
+                                  "service",
+                                );
+                            updateMember(index, nextAlias, {
+                              ...s,
+                              controller,
+                              app,
+                              condition:
+                                a &&
+                                (a.effective_config || a.config).health?.type
+                                  ? "healthy"
+                                  : "running",
+                            });
+                          }}
+                        />
                         <Field
                           label={`Member alias ${index + 1}`}
                           value={alias}
-                          onChange={(a) => updateMember(index, a, s)}
+                          onChange={(a) => updateMember(index, a, s, true)}
                         />
-                        <label className="app-field">
-                          <span>Service</span>
-                          <select
-                            aria-label={`Service ${index + 1}`}
-                            value={ref}
-                            onChange={(e) => {
-                              const [controller, app] = JSON.parse(
-                                e.target.value,
-                              ) as string[];
-                              const a = apps.find(
-                                (a) =>
-                                  reference(choice(a), localIdentity) ===
-                                  e.target.value,
-                              );
-                              updateMember(index, alias, {
-                                ...s,
-                                controller,
-                                app,
-                                condition:
-                                  a &&
-                                  (a.effective_config || a.config).health?.type
-                                    ? "healthy"
-                                    : "running",
-                              });
-                            }}
-                          >
-                            {!known && (
-                              <option value={ref}>
-                                Unavailable / {s.app} ({s.controller})
-                              </option>
-                            )}
-                            {options.map((o) => (
-                              <option
-                                key={reference(o.ref, localIdentity)}
-                                value={reference(o.ref, localIdentity)}
-                                disabled={Object.entries(
-                                  draft.values.services,
-                                ).some(
-                                  ([a, other]) =>
-                                    a !== alias &&
-                                    reference(other, localIdentity) ===
-                                      reference(o.ref, localIdentity),
-                                )}
-                              >
-                                {o.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
                         <label className="app-field">
                           <span>Condition</span>
                           <select
@@ -482,6 +544,7 @@ export function WorkspaceEditor({
                         className="button small"
                         type="button"
                         onClick={() => {
+                          customAliases.current.delete(alias);
                           const services = Object.fromEntries(
                             Object.entries(draft.values.services).filter(
                               ([a]) => a !== alias,

@@ -44,6 +44,8 @@ type Server struct {
 	ControllerID            string
 	controllerOnce          sync.Once
 	workspaceOnce           sync.Once
+	workspaceActionMu       sync.Mutex
+	workspaceActions        map[string]bool
 	controllerErr           error
 	peerMu                  sync.Mutex
 	peerStreams             map[string]map[*peerStream]struct{}

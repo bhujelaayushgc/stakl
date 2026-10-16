@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
-import { request, elapsed, type App, type Config } from "./types";
+import { Play, Plus, RefreshCw, Square } from "lucide-react";
+import { request, elapsed, RequestError, type App, type Config } from "./types";
 import { PageHeader, EmptyState, StatusIndicator } from "./ui";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import { removeWorkspaceConfiguration } from "./workspace-config";
-import type { WorkspaceView } from "./workspace-types";
+import type {
+  WorkspaceMember,
+  WorkspaceOperation,
+  WorkspaceView,
+} from "./workspace-types";
 import "./workspaces.css";
 
 type Props = {
@@ -42,6 +46,8 @@ export function WorkspacesPage({
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [editor, setEditor] = useState<string | null>(null);
+  const [operation, setOperation] = useState<WorkspaceOperation | null>(null),
+    [activeAction, setActiveAction] = useState("");
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const values = await request<WorkspaceView[]>(
@@ -72,6 +78,7 @@ export function WorkspacesPage({
     setEditor(null);
     setError("");
     setNotice("");
+    setOperation(null);
   }, [workspaceID]);
   const views = readError
     ? data.map((w) => ({
@@ -81,11 +88,63 @@ export function WorkspacesPage({
           ...m,
           state: "unknown" as const,
           controllable: false,
+          actions: {
+            start: false,
+            stop: false,
+            reason:
+              "Service observations are unavailable; refresh before operating",
+          },
           checks: m.checks.map((p) => ({ ...p, state: "unknown" as const })),
         })),
       }))
     : data;
   const workspace = views.find((w) => w.id === workspaceID);
+  const operate = async (
+    action: "start" | "stop",
+    member?: WorkspaceMember,
+  ) => {
+    if (!workspace || busy || readError) return;
+    const shared = member?.uses.filter((use) => use.id !== workspace.id) || [];
+    if (
+      action === "stop" &&
+      shared.length &&
+      !window.confirm(
+        `Stop ${member!.name}?\nAlso used by: ${shared.map((use) => `${use.name} (${use.required ? "required" : "optional"})`).join(", ")}.\nThese projects may lose a service they need.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setActiveAction(`${action}:${member?.alias || "workspace"}`);
+    setError("");
+    setNotice("");
+    setOperation(null);
+    const path = member
+      ? `/workspaces/${encodeURIComponent(workspace.id)}/members/${encodeURIComponent(member.alias)}/${action}`
+      : `/workspaces/${encodeURIComponent(workspace.id)}/start`;
+    try {
+      const result = await request<WorkspaceOperation>(path, {
+        ...(workspace.revision ? { revision: workspace.revision } : {}),
+        ...(action === "stop" && shared.length ? { confirm_shared: true } : {}),
+      });
+      setOperation(result);
+      setNotice(
+        "Action request finished. Review each service result; readiness updates from observations and checks.",
+      );
+    } catch (e) {
+      setError(
+        `${(e as Error).message}. ${
+          e instanceof RequestError && e.outcome_unknown
+            ? "Outcome unknown. Inspect refreshed service state and Activity before deciding whether to retry."
+            : "Refresh service evidence and inspect the affected service before trying again."
+        }`,
+      );
+    } finally {
+      onSaved();
+      await load();
+      setActiveAction("");
+      setBusy(false);
+    }
+  };
   const check = async () => {
     if (!workspace) return;
     setBusy(true);
@@ -195,6 +254,13 @@ export function WorkspacesPage({
         </div>
       )}
       {notice && <p role="status">{notice}</p>}
+      {activeAction && (
+        <p role="status">
+          {activeAction.startsWith("start:")
+            ? "Starting services..."
+            : "Stopping service..."}{" "}
+        </p>
+      )}
       {loading ? (
         <p role="status">Loading workspaces...</p>
       ) : workspaceID && !workspace ? (
@@ -213,6 +279,21 @@ export function WorkspacesPage({
               {workspace.optional_issues} optional issues
             </span>
             <button
+              className="button primary"
+              aria-label="Start workspace"
+              disabled={
+                busy ||
+                !!readError ||
+                !workspace.members.some((m) => m.actions?.start)
+              }
+              onClick={() => void operate("start")}
+            >
+              <Play size={15} aria-hidden="true" />
+              {activeAction === "start:workspace"
+                ? "Starting workspace..."
+                : "Start workspace"}
+            </button>
+            <button
               className="button"
               disabled={
                 busy ||
@@ -229,6 +310,22 @@ export function WorkspacesPage({
             Readiness covers configured requirements. Checks run on this
             controller, not the browser or a member's remote host.
           </p>
+          {operation && (
+            <section aria-label="Workspace action results">
+              <h2>Service action results</h2>
+              <ul className="workspace-checks">
+                {operation.results.map((result) => (
+                  <li key={result.alias}>
+                    <div className="workspace-check-heading">
+                      <strong>{result.name}</strong>
+                      <StatusIndicator status={result.status} />
+                    </div>
+                    <p>{result.message}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <div className="workspace-members">
             {workspace.members.map((m) => (
               <section
@@ -260,16 +357,48 @@ export function WorkspacesPage({
                     ? " - Observation only; no captured logs"
                     : ""}
                 </small>
-                {m.host && (
-                  <div className="workspace-actions">
+                <div className="workspace-actions">
+                  <button
+                    className="button small"
+                    aria-label={`Start ${m.name}`}
+                    disabled={busy || !!readError || !m.actions?.start}
+                    title={!m.actions?.start ? m.actions?.reason : undefined}
+                    onClick={() => void operate("start", m)}
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    Start
+                  </button>
+                  <button
+                    className="button small"
+                    aria-label={`Stop ${m.name}`}
+                    disabled={busy || !!readError || !m.actions?.stop}
+                    title={
+                      !m.actions?.stop
+                        ? m.actions?.reason || "Service is not running"
+                        : undefined
+                    }
+                    onClick={() => void operate("stop", m)}
+                  >
+                    <Square size={14} aria-hidden="true" />
+                    Stop
+                  </button>
+                  {m.host && (
                     <button
                       className="button small"
                       onClick={() => onOpenService(m.app, m.host!.id)}
                     >
                       Inspect {m.name}
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
+                {!m.actions?.start &&
+                  !m.actions?.stop &&
+                  m.actions?.reason !== m.reason && (
+                    <small>
+                      {m.actions?.reason ||
+                        "Lifecycle controls are unavailable until fresh service evidence is available"}
+                    </small>
+                  )}
                 {m.checks.length > 0 && (
                   <ul
                     className="workspace-checks"

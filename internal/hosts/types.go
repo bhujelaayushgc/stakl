@@ -56,8 +56,9 @@ type Snapshot struct {
 }
 
 type LifecycleResponse struct {
-	Info    Info              `json:"info"`
-	Results map[string]string `json:"results"`
+	Info           Info              `json:"info"`
+	Results        map[string]string `json:"results"`
+	OutcomeUnknown *bool             `json:"outcome_unknown,omitempty"`
 }
 
 type PeerActionResult = LifecycleResponse

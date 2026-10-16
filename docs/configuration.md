@@ -77,6 +77,8 @@ Workspaces describe the services a project needs. Profiles remain collections fo
 
 Use **Workspaces -> Create workspace** to select existing services. **Add external service** registers an observation-only HTTP or TCP endpoint and its membership in the same configuration save. This is useful for a shared database in a reachable Proxmox guest. Stakl does not discover or operate Proxmox VMs or containers. Workspace edits preserve unrelated YAML and use revision checks; conflicts retain the draft. Anchors, aliases and merges that cannot be edited safely require the full Configuration editor.
 
+Workspace IDs populate from the workspace name; member aliases populate from the selected service name. Both avoid existing identifiers and preserve manual edits. The Service field offers typeahead suggestions by service name, app ID, or host.
+
 ```yaml
 apps:
   shared-postgres:
@@ -132,7 +134,11 @@ Project checks allow only `http`, `tcp` and `command`. HTTP uses GET, accepts 20
 
 Checks default to a 30-second interval and 2-second timeout. Intervals must be at least 5 seconds; timeouts must be greater than zero and at most 30 seconds. Health-only fields such as thresholds and initial delay, and fields irrelevant to the selected check type, are rejected even when empty or zero. Results are cached for twice the interval; restart and successful reload discard them. **Check now** schedules configured probes on this controller; it does not accept a new target or command. Four workers bound concurrency. Only the local administrator can configure or trigger these checks; peer grants do not expand these permissions.
 
-Use `stakl workspace list` and `stakl workspace status ID` for read-only inspection. This release does not add cross-host bulk lifecycle, automatic dependency discovery, tunnels, merged logs, workspace check history, or native Proxmox control.
+**Start workspace** starts eligible stopped or failed members, including optional and shared services, through their existing local or connected-host controllers. Running services are left running, including unhealthy services. Read-only, observation-only, stale, transitional, missing and ambiguous members cannot be started through workspace controls. Each service gets its own outcome; successful starts remain running when another member fails. Existing app dependencies remain authoritative and may start apps outside this workspace. Membership does not define a cross-controller startup order. Starting services and satisfying the configured readiness conditions are separate results.
+
+Member rows provide individual **Start** and **Stop** controls. Stop respects process ownership and configured custom stop commands. Stopping a shared service requires confirmation naming known affected workspaces, including whether each requires it. Membership does not establish whether a project is actively using the service. Observation-only endpoints, including a database merely observed in a Proxmox guest, require lifecycle support from their actual manager before Stakl can start or stop them. Workspace-wide Stop and automatic shutdown on workspace deletion or navigation are not provided.
+
+Use `stakl workspace list` and `stakl workspace status ID` for read-only inspection. This release does not add automatic dependency discovery, cross-controller dependency ordering, tunnels, merged logs, workspace check history, or native Proxmox control.
 
 ## HTTPS and headless peers
 

@@ -2,6 +2,8 @@ package workspaces
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"github.com/bhujelaayushgc/stakl/internal/config"
 	"github.com/bhujelaayushgc/stakl/internal/hosts"
 	"sync"
@@ -16,6 +18,7 @@ type Engine struct {
 	wg                sync.WaitGroup
 	current           *config.Config
 	generation        uint64
+	instance          string
 	root              context.Context
 	cancel            context.CancelFunc
 	generationContext context.Context
@@ -28,7 +31,7 @@ type Engine struct {
 }
 
 func New(source func() *config.Config, snapshots func() []hosts.Envelope) *Engine {
-	return &Engine{config: source, snapshots: snapshots, wake: make(chan struct{}, 1)}
+	return &Engine{config: source, snapshots: snapshots, wake: make(chan struct{}, 1), instance: rand.Text()}
 }
 func (e *Engine) Views() []View {
 	e.mu.Lock()
@@ -38,8 +41,13 @@ func (e *Engine) Views() []View {
 	for k, v := range e.results {
 		results[k] = v
 	}
+	revision := fmt.Sprintf("%s:%d", e.instance, e.generation)
 	e.mu.Unlock()
-	return Evaluate(c, e.snapshots(), results, time.Now().UTC())
+	views := Evaluate(c, e.snapshots(), results, time.Now().UTC())
+	for i := range views {
+		views[i].Revision = revision
+	}
+	return views
 }
 func (e *Engine) Impact(controller, app string) []Use {
 	return Impact(e.config(), e.snapshots(), controller, app)

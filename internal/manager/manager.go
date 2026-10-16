@@ -549,8 +549,50 @@ func RestartDelay(p config.Restart, attempt int) time.Duration {
 	return d
 }
 func (m *Manager) Operate(ctx context.Context, action string, ids []string, force bool) map[string]string {
+	return m.OperateDetailed(ctx, action, ids, force).Results
+}
+
+type OperationResult struct {
+	Results        map[string]string
+	OutcomeUnknown bool
+}
+
+type uncertainOutcomeError struct{ cause error }
+
+func (e *uncertainOutcomeError) Error() string { return e.cause.Error() }
+func (e *uncertainOutcomeError) Unwrap() error { return e.cause }
+
+func (m *Manager) OperateDetailed(ctx context.Context, action string, ids []string, force bool) OperationResult {
 	m.op.Lock()
 	defer m.op.Unlock()
+	return m.operateDetailedLocked(ctx, action, ids, force)
+}
+
+// OperateWithConfig keeps workspace membership bound to the config generation
+// checked by its caller, including while waiting for another lifecycle action.
+func (m *Manager) OperateWithConfig(ctx context.Context, action string, ids []string, force bool, expected *config.Config) (OperationResult, error) {
+	m.op.Lock()
+	defer m.op.Unlock()
+	if m.Config() != expected {
+		return OperationResult{}, fmt.Errorf("configuration changed; refresh before operating")
+	}
+	return m.operateDetailedLocked(ctx, action, ids, force), nil
+}
+
+func (m *Manager) operateDetailedLocked(ctx context.Context, action string, ids []string, force bool) OperationResult {
+	unknown := false
+	results := m.operateLocked(ctx, action, ids, force, &unknown)
+	m.mu.RLock()
+	for id, result := range results {
+		if app := m.apps[id]; result != "ok" && app != nil && app.Runtime.State == "unknown" && app.Runtime.Launch != "" {
+			unknown = true
+		}
+	}
+	m.mu.RUnlock()
+	return OperationResult{Results: results, OutcomeUnknown: unknown}
+}
+
+func (m *Manager) operateLocked(ctx context.Context, action string, ids []string, force bool, uncertain *bool) map[string]string {
 	if e := ctx.Err(); e != nil {
 		return map[string]string{"error": e.Error()}
 	}
@@ -651,6 +693,9 @@ func (m *Manager) Operate(ctx context.Context, action string, ids []string, forc
 			continue
 		}
 		if e := m.startOne(ctx, id, false); e != nil {
+			if _, ok := e.(*uncertainOutcomeError); ok {
+				*uncertain = true
+			}
 			out[id] = e.Error()
 		} else {
 			out[id] = "ok"
@@ -762,6 +807,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 			t.Runtime.Launch = newRuntime.Launch
 			t.Runtime.Started = newRuntime.Started
 			t.Runtime.State = "unknown"
+			e = &uncertainOutcomeError{cause: e}
 		}
 	} else {
 		newRuntime.RestartCount = count

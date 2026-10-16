@@ -415,7 +415,7 @@ func (r *Registry) Snapshots() []Envelope {
 
 // connection captures a generation without exposing connection secrets. Network
 // work holds no registry lock and is canceled when this generation is replaced.
-func (r *Registry) connection(id string, control bool) (*hostEntry, *Client, error) {
+func (r *Registry) connection(id string, control bool, expectedController ...string) (*hostEntry, *Client, error) {
 	r.mu.RLock()
 	entry := r.entries[id]
 	if r.closed || entry == nil {
@@ -441,6 +441,9 @@ func (r *Registry) connection(id string, control bool) (*hostEntry, *Client, err
 		entry.client = client
 	}
 	if control {
+		if len(expectedController) > 0 && expectedController[0] != "" && entry.record.ControllerID != expectedController[0] {
+			return nil, nil, &HostError{Message: "Controller registration changed; refresh before operating", State: StateIdentityMismatch, StatusCode: http.StatusConflict}
+		}
 		if description(entry, time.Now()).Stale {
 			return nil, nil, &HostError{Message: "Host observation is stale; reconnect before operating", State: entry.state, StatusCode: http.StatusConflict}
 		}
@@ -482,7 +485,18 @@ func (r *Registry) ReadApp(ctx context.Context, hostID, appID, resource string, 
 }
 
 func (r *Registry) Operate(ctx context.Context, hostID, appID, action string) (PeerActionResult, error) {
-	entry, client, err := r.connection(hostID, true)
+	return r.operate(ctx, hostID, "", appID, action)
+}
+
+func (r *Registry) OperateController(ctx context.Context, hostID, controllerID, appID, action string) (PeerActionResult, error) {
+	if controllerID == "" {
+		return PeerActionResult{}, &HostError{Message: "Controller identity is required", State: StateIdentityMismatch, StatusCode: http.StatusConflict}
+	}
+	return r.operate(ctx, hostID, controllerID, appID, action)
+}
+
+func (r *Registry) operate(ctx context.Context, hostID, controllerID, appID, action string) (PeerActionResult, error) {
+	entry, client, err := r.connection(hostID, true, controllerID)
 	if err != nil {
 		return PeerActionResult{}, err
 	}

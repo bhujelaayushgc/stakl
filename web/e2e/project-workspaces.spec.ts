@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createServer } from "node:net";
-import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import YAML from "yaml";
 
 type Instance = { url: string; token: string };
@@ -26,6 +26,226 @@ async function save(raw: string) {
   const current = await api(hub(), "/config?raw=true");
   await api(hub(), "/config/save", { yaml: raw, revision: current.revision });
 }
+
+test("workspace lifecycle starts local and remote members safely and confirms shared stops", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  const original = await api(hub(), "/config?raw=true");
+  const peerApp = await api(peer(), "/apps/ticker");
+  const wasRunning = ["running", "healthy", "unhealthy"].includes(
+    peerApp.runtime.state,
+  );
+  let hostID = "",
+    tokenID = "";
+  try {
+    await api(peer(), "/apps/ticker/stop", {});
+    await expect
+      .poll(
+        async () => {
+          const app = await api(peer(), "/apps/ticker");
+          return (
+            app.runtime.state === "stopped" &&
+            !app.observed_at.startsWith("0001-")
+          );
+        },
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    const token = await api(peer(), "/peer-tokens", {
+      name: "Workspace lifecycle",
+      access: "control",
+      groups: ["development"],
+    });
+    tokenID = token.id;
+    const registered = await api(hub(), "/hosts", {
+      name: "Workspace peer",
+      url: peer().url,
+      token: token.token,
+    });
+    hostID = registered.id;
+    const cfg = YAML.parse(original.raw);
+    cfg.apps["workspace-worker"] = {
+      name: "Workspace worker",
+      type: "custom",
+      start: {
+        command: "echo launch >> workspace-launches; touch workspace-live",
+        shell: true,
+      },
+      stop: { command: "rm -f workspace-live", shell: true },
+      status: { command: "test -f workspace-live", shell: true },
+      health: {
+        type: "command",
+        command: "test -f workspace-live",
+        interval: "200ms",
+      },
+    };
+    cfg.apps["optional-helper"] = {
+      name: "Optional helper",
+      type: "custom",
+      start: { command: "exit 1", shell: true },
+      stop: { command: "exit 0", shell: true },
+      status: { command: "exit 1", shell: true },
+    };
+    cfg.apps["workspace-observation"] = {
+      name: "Shared observation",
+      type: "external",
+      detect: { type: "command", command: "exit 0", interval: "200ms" },
+    };
+    cfg.workspaces = {
+      ...cfg.workspaces,
+      "lifecycle-a": {
+        name: "Workspace A",
+        services: {
+          worker: { controller: "local", app: "workspace-worker" },
+          remote: { controller: registered.controller_id, app: "ticker" },
+          helper: {
+            controller: "local",
+            app: "optional-helper",
+            required: false,
+          },
+          database: { controller: "local", app: "workspace-observation" },
+        },
+      },
+      "lifecycle-b": {
+        name: "Workspace B",
+        services: { worker: { controller: "local", app: "workspace-worker" } },
+      },
+    };
+    await save(YAML.stringify(cfg));
+    await expect
+      .poll(
+        async () => {
+          const v = await api(hub(), "/workspaces/lifecycle-a");
+          return v.members
+            .filter((m: any) => ["worker", "remote"].includes(m.alias))
+            .every((m: any) => m.actions.start);
+        },
+        { timeout: 20000 },
+      )
+      .toBe(true);
+    const i = browser();
+    await page.goto(
+      `${i.url}/?token=${i.token}&view=workspaces&workspace=lifecycle-a`,
+    );
+    const observation = page.getByRole("region", {
+      name: "Member database",
+      exact: true,
+    });
+    await expect(
+      observation.getByRole("button", { name: "Start Shared observation" }),
+    ).toBeDisabled();
+    await expect(
+      observation.getByRole("button", { name: "Stop Shared observation" }),
+    ).toBeDisabled();
+    await page
+      .getByRole("button", { name: "Start workspace", exact: true })
+      .click();
+    const results = page.getByRole("region", {
+      name: "Workspace action results",
+    });
+    await expect(results.getByText("Started", { exact: true })).toHaveCount(2, {
+      timeout: 20000,
+    });
+    await expect(results.getByText("Failed", { exact: true })).toBeVisible();
+    const pid = (await api(peer(), "/apps/ticker")).runtime.pid;
+    expect(pid).toBeGreaterThan(0);
+    const launches = join(
+      dirname(process.env.STAKL_TEST_CONFIG!),
+      "workspace-launches",
+    );
+    expect(await readFile(launches, "utf8")).toBe("launch\n");
+    await expect
+      .poll(
+        async () => {
+          const workspace = await api(hub(), "/workspaces/lifecycle-a");
+          return workspace.members.every((member: any) =>
+            ["worker", "remote"].includes(member.alias)
+              ? member.actions.stop
+              : member.alias === "helper"
+                ? member.actions.start
+                : member.observation_fresh,
+          );
+        },
+        { timeout: 20000 },
+      )
+      .toBe(true);
+    await expect(
+      page.getByRole("button", { name: "Start workspace", exact: true }),
+    ).toBeEnabled({ timeout: 15000 });
+    await page
+      .getByRole("button", { name: "Start workspace", exact: true })
+      .click();
+    await expect(results.locator(".status-already_running")).toHaveCount(3, {
+      timeout: 20000,
+    });
+    expect(await readFile(launches, "utf8")).toBe("launch\n");
+    expect((await api(peer(), "/apps/ticker")).runtime.pid).toBe(pid);
+    const stop = page.getByRole("button", {
+      name: "Stop Workspace worker",
+      exact: true,
+    });
+    await expect(stop).toBeEnabled({ timeout: 15000 });
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("Workspace B (required)");
+      await dialog.dismiss();
+    });
+    await stop.click();
+    expect(["running", "healthy", "unhealthy"]).toContain(
+      (await api(hub(), "/apps/workspace-worker")).runtime.state,
+    );
+    page.once("dialog", (dialog) => dialog.accept());
+    await stop.click();
+    await expect(results.getByText("Stopped", { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+    expect((await api(hub(), "/apps/workspace-worker")).runtime.state).toBe(
+      "stopped",
+    );
+    await expect
+      .poll(async () => (await api(hub(), "/workspaces/lifecycle-b")).state, {
+        timeout: 15000,
+      })
+      .toBe("blocked");
+    const start = page.getByRole("button", {
+      name: "Start Workspace worker",
+      exact: true,
+    });
+    await expect(start).toBeEnabled({ timeout: 15000 });
+    await start.click();
+    await expect(results.getByText("Started", { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+    expect(await readFile(launches, "utf8")).toBe("launch\nlaunch\n");
+    const stopRemote = page.getByRole("button", {
+      name: "Stop Heartbeat service",
+      exact: true,
+    });
+    await expect(stopRemote).toBeEnabled({ timeout: 15000 });
+    await stopRemote.click();
+    await expect(results.getByText("Stopped", { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+    expect((await api(peer(), "/apps/ticker")).runtime.state).toBe("stopped");
+    const startRemote = page.getByRole("button", {
+      name: "Start Heartbeat service",
+      exact: true,
+    });
+    await expect(startRemote).toBeEnabled({ timeout: 20000 });
+    await startRemote.click();
+    await expect(results.getByText("Started", { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+    expect((await api(peer(), "/apps/ticker")).runtime.pid).toBeGreaterThan(0);
+  } finally {
+    await api(hub(), "/apps/workspace-worker/stop", {}).catch(() => {});
+    if (!wasRunning) await api(peer(), "/apps/ticker/stop", {});
+    else await api(peer(), "/apps/ticker/start", {});
+    await save(original.raw);
+    if (hostID) await api(hub(), `/hosts/${hostID}/remove`, {});
+    if (tokenID) await api(peer(), `/peer-tokens/${tokenID}/revoke`, {});
+  }
+});
 
 test("palette log navigation confirms discarding workspace drafts and returns safely", async ({
   page,
@@ -143,9 +363,36 @@ test("workspace forms share one external service, isolate checks and delete defi
     await page
       .getByRole("button", { name: "Add existing service", exact: true })
       .click();
-    await page
-      .getByLabel("Service 1", { exact: true })
-      .selectOption({ label: "Local / Shared PostgreSQL" });
+    const serviceInput = page.getByRole("combobox", {
+      name: "Service 1",
+      exact: true,
+    });
+    await serviceInput.fill("nothing-matches");
+    await expect(
+      page.getByText("No matching services", { exact: true }),
+    ).toBeVisible();
+    await serviceInput.fill("PostgreSQL");
+    await expect(
+      page.getByRole("option", {
+        name: "Local / Shared PostgreSQL",
+        exact: true,
+      }),
+    ).toBeVisible();
+    const checkPickerBounds = async (width: number) => {
+      const bounds = await page
+        .getByRole("listbox", { name: "Service 1 suggestions", exact: true })
+        .boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    };
+    await checkPickerBounds(1440);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await serviceInput.scrollIntoViewIfNeeded();
+    await checkPickerBounds(390);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await serviceInput.press("ArrowDown");
+    await serviceInput.press("Enter");
+    await expect(serviceInput).toHaveValue("Local / Shared PostgreSQL");
     await page
       .getByRole("button", { name: "Save workspace", exact: true })
       .click();

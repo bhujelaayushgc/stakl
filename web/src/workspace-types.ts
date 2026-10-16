@@ -32,10 +32,12 @@ export type WorkspaceMember = {
   observation_fresh?: boolean;
   host?: HostDescription;
   controllable: boolean;
+  actions?: { start: boolean; stop: boolean; reason: string };
   uses: WorkspaceUse[];
   checks: WorkspaceCheckView[];
 };
 export type WorkspaceView = {
+  revision?: string;
   id: string;
   name: string;
   description: string;
@@ -44,4 +46,24 @@ export type WorkspaceView = {
   members: WorkspaceMember[];
   required_issues: number;
   optional_issues: number;
+};
+
+export type WorkspaceOperation = {
+  workspace: string;
+  action: "start" | "stop";
+  results: {
+    alias: string;
+    controller: string;
+    app: string;
+    name: string;
+    action: "start" | "stop";
+    status:
+      | "started"
+      | "stopped"
+      | "already_running"
+      | "skipped"
+      | "failed"
+      | "outcome_unknown";
+    message: string;
+  }[];
 };

@@ -19,7 +19,7 @@ func TestWorkspaceReadsAreAdminOnlyAndSanitized(t *testing.T) {
 		Name: "Project", Services: map[string]config.WorkspaceService{"db": {Controller: "local", App: "missing", Condition: "running", Required: true}},
 		Checks: map[string]config.WorkspaceProbe{"query": {Name: "Database query", Service: "db", EnvFile: []string{"private-credentials"}, Check: config.WorkspaceCheck{Type: "command", Command: "secret-command"}}},
 	}}
-	token, _ := issuePeer(t, h, "control")
+	_, token := issuePeer(t, h, "control")
 	for _, path := range []string{"/api/workspaces", "/api/workspaces/project", "/api/workspaces/impact?controller=local&app=missing"} {
 		for _, credential := range []string{"", token} {
 			w := peerRequest(h, "GET", path, credential, "", "")
@@ -75,7 +75,7 @@ workspaces:
 	if err := os.Remove(filepath.Join(s.Manager.Dir, "workspace-checked")); err != nil {
 		t.Fatal(err)
 	}
-	token, _ := issuePeer(t, h, "control")
+	_, token := issuePeer(t, h, "control")
 	for _, credential := range []string{"", token} {
 		if w := peerRequest(h, "POST", "/api/workspaces/project/check", credential, "", ""); w.Code != 401 {
 			t.Fatal(w.Code, w.Body.String())
