@@ -47,7 +47,8 @@ func (s *Server) peerDataRoutes(mux *http.ServeMux) {
 			if !s.peerAppExists(w, r) {
 				return
 			}
-			JSON(w, hosts.LifecycleResponse{Info: s.peerInfo(r), Results: s.Manager.Operate(r.Context(), action, []string{r.PathValue("id")}, false)})
+			operation := s.Manager.OperateDetailed(r.Context(), action, []string{r.PathValue("id")}, false)
+			JSON(w, hosts.LifecycleResponse{Info: s.peerInfo(r), Results: operation.Results, OutcomeUnknown: &operation.OutcomeUnknown})
 		})
 	}
 }

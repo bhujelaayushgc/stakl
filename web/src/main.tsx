@@ -75,6 +75,9 @@ import {
 } from "./types";
 import { PortsPage, usePortScan } from "./Ports";
 import { HostsPage } from "./HostsPage";
+import { WorkspacesPage } from "./WorkspacesPage";
+import { workspaceUses } from "./workspace-ui";
+import type { WorkspaceView, WorkspaceUse } from "./workspace-types";
 import {
   canControlApp,
   flattenHosts,
@@ -108,6 +111,7 @@ type Action = (
   action: string,
   profile?: boolean,
   hostID?: string,
+  impactConfirmed?: boolean,
 ) => Promise<void>;
 const icons = {
   process: Terminal,
@@ -126,6 +130,7 @@ const decimalFormat = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
 });
 const views = new Set([
+  "workspaces",
   "dashboard",
   "ports",
   "activity",
@@ -147,6 +152,7 @@ const route = () => {
   return {
     page: views.has(view) ? view : "dashboard",
     selected: params.get("app"),
+    workspace: params.get("workspace") || undefined,
     scope: params.get("host") || "local",
     appHost:
       params.get("host") === "all"
@@ -197,6 +203,9 @@ export function AppShell() {
     [notice, setNotice] = useState(""),
     [connected, setConnected] = useState(false),
     [page, setPage] = useState(() => route().page),
+    [workspaceID, setWorkspaceID] = useState(() => route().workspace),
+    [workspaceRevision, setWorkspaceRevision] = useState(0),
+    [workspaceDetailAllowed, setWorkspaceDetailAllowed] = useState(false),
     [selected, setSelected] = useState<string | null>(() => route().selected),
     [detailTab, setDetailTab] = useState(() => route().tab),
     [busy, setBusy] = useState<Set<string>>(new Set()),
@@ -248,13 +257,13 @@ export function AppShell() {
     page,
     configDirty,
     editorDirty,
-    editorOpen: !!appEditor,
+    editorOpen: !!appEditor || (page === "workspaces" && editorDirty),
   });
   dirtyPage.current = {
     page,
     configDirty,
     editorDirty,
-    editorOpen: !!appEditor,
+    editorOpen: !!appEditor || (page === "workspaces" && editorDirty),
   };
   const writeUrl = (url: URL, push = false, detailFrom = false) => {
     if (url.href === window.location.href) return;
@@ -290,7 +299,7 @@ export function AppShell() {
         !window.confirm(
           dirty.page === "config"
             ? "Discard unsaved configuration changes?"
-            : "Discard your edited application draft?",
+            : "Discard your unsaved draft?",
         )
       ) {
         const targetIndex = event.state?.staklIndex;
@@ -311,6 +320,8 @@ export function AppShell() {
       setAppEditor(null);
       setEditorDirty(false);
       setPage(next.page);
+      setWorkspaceID(next.workspace);
+      setWorkspaceRevision((n) => n + 1);
       setSelected(next.selected);
       setScope(next.scope);
       setAppHost(next.appHost);
@@ -478,7 +489,20 @@ export function AppShell() {
       return () => clearTimeout(t);
     }
   }, [notice]);
-  const run: Action = async (id, action, profile = false, hostID = "local") => {
+  const usesFor = (app: App) =>
+    workspaceUses(
+      cfg?.workspaces,
+      app.host?.id === "local" || !app.host ? "local" : app.host.controller_id,
+      app.config.id,
+      localHost?.controller_id || "",
+    );
+  const run: Action = async (
+    id,
+    action,
+    profile = false,
+    hostID = "local",
+    impactConfirmed = false,
+  ) => {
     const target = allApps.find(
       (a) => a.config.id === id && (a.host?.id || "local") === hostID,
     );
@@ -488,6 +512,32 @@ export function AppShell() {
       (!canControlApp(target, action) || busy.has(identity(target)))
     )
       return;
+    if (
+      !profile &&
+      page === "workspaces" &&
+      selected === id &&
+      ["start", "stop", "restart", "kill"].includes(action) &&
+      !workspaceDetailAllowed
+    )
+      return;
+    if (
+      !profile &&
+      target &&
+      !impactConfirmed &&
+      ["stop", "restart"].includes(action)
+    ) {
+      const uses = usesFor(target);
+      if (uses.length) {
+        setConfirm({
+          title: `${action === "stop" ? "Stop" : "Restart"} ${target.config.name}?`,
+          message: `Known workspace impact on this controller: ${uses.map((u) => `${u.name} (${u.required ? "required" : "optional"})`).join(", ")}. ${action === "stop" ? "These projects may lose a service they need." : "These projects may be interrupted while the service restarts."}`,
+          actionLabel:
+            action === "stop" ? "Stop application" : "Restart application",
+          run: () => void run(id, action, profile, hostID, true),
+        });
+        return;
+      }
+    }
     if (
       hostID !== "local" &&
       (profile || !["start", "stop", "restart"].includes(action))
@@ -547,7 +597,7 @@ export function AppShell() {
       setNotice(`${action} completed`);
     } catch (e) {
       setError(
-        `Could not ${action} workspace applications: ${(e as Error).message}. Check Activity or application logs for details.`,
+        `Could not ${action} applications: ${(e as Error).message}. Check Activity or application logs for details.`,
       );
     } finally {
       setBusy((b) => {
@@ -565,12 +615,17 @@ export function AppShell() {
     saved = false,
   ) => {
     if (
-      appEditor &&
       editorDirty &&
       !saved &&
-      !window.confirm("Discard your unsaved application changes?")
+      !window.confirm(
+        appEditor
+          ? "Discard your unsaved application changes?"
+          : "Discard your unsaved workspace changes?",
+      )
     )
       return;
+    if (page === "workspaces" && editorDirty)
+      setWorkspaceRevision((n) => n + 1);
     setAppEditor(null);
     setEditorDirty(false);
     writeUrl(
@@ -732,22 +787,25 @@ export function AppShell() {
   };
   const nav = (p: string, saved = false) => {
     if (
-      (p !== page || !!appEditor) &&
+      (p !== page || !!appEditor || editorDirty) &&
       !saved &&
       ((page === "config" && configDirty) || editorDirty) &&
       !window.confirm(
         page === "config"
           ? "Discard unsaved configuration changes?"
-          : "Discard your edited application draft?",
+          : "Discard your unsaved draft?",
       )
     )
       return;
     if (page === "config") setConfigDirty(false);
+    if (page === "workspaces" && editorDirty)
+      setWorkspaceRevision((n) => n + 1);
     setEditorDirty(false);
     setAppEditor(null);
     writeUrl(
       routeUrl({
         view: p === "dashboard" ? null : p,
+        workspace: null,
         app: null,
         app_host: null,
         tab: null,
@@ -755,12 +813,14 @@ export function AppShell() {
       true,
     );
     setPage(p);
+    setWorkspaceID(undefined);
     setSelected(null);
     setMobileNav(false);
   };
   const navHref = (p: string) =>
     routeUrl({
       view: p === "dashboard" ? null : p,
+      workspace: null,
       app: null,
       app_host: null,
       tab: null,
@@ -780,6 +840,54 @@ export function AppShell() {
     event.preventDefault();
     nav(p);
   };
+  const selectWorkspace = (id?: string) => {
+    writeUrl(
+      routeUrl({
+        view: "workspaces",
+        workspace: id || null,
+        app: null,
+        app_host: null,
+        tab: null,
+      }),
+      true,
+    );
+    setPage("workspaces");
+    setWorkspaceID(id);
+    setSelected(null);
+    setEditorDirty(false);
+    setMobileNav(false);
+  };
+  useEffect(() => {
+    setWorkspaceDetailAllowed(false);
+    if (page !== "workspaces" || !workspaceID || !selected) return;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const view = await request<WorkspaceView>(
+          `/workspaces/${encodeURIComponent(workspaceID)}`,
+          undefined,
+          controller.signal,
+        );
+        if (!controller.signal.aborted)
+          setWorkspaceDetailAllowed(
+            view.members.some(
+              (m) =>
+                m.app === selected &&
+                m.host?.id === appHost &&
+                m.observation_fresh === true,
+            ),
+          );
+      } catch {
+        if (!controller.signal.aborted) setWorkspaceDetailAllowed(false);
+      }
+    };
+    void load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [page, workspaceID, selected, appHost]);
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -829,6 +937,15 @@ export function AppShell() {
           >
             <Layers3 aria-hidden="true" />
             Applications
+          </a>
+          <a
+            href={navHref("workspaces")}
+            className={page === "workspaces" ? "active" : ""}
+            aria-current={page === "workspaces" ? "page" : undefined}
+            onClick={(e) => onNavClick(e, "workspaces")}
+          >
+            <FolderOpen aria-hidden="true" />
+            Workspaces
           </a>
           <a
             href={navHref("ports")}
@@ -895,6 +1012,7 @@ export function AppShell() {
                 (
                   {
                     dashboard: "Applications",
+                    workspaces: "Workspaces",
                     activity: "Activity",
                     config: "Configuration",
                     discover: "Discover apps",
@@ -1026,7 +1144,7 @@ export function AppShell() {
                             ) : (
                               <Play size={14} aria-hidden="true" />
                             )}
-                            Workspace actions
+                            Application actions
                             <ChevronRight
                               className="rotate-down"
                               size={14}
@@ -1375,6 +1493,21 @@ export function AppShell() {
               </section>
             </>
           )}
+          {page === "workspaces" && (
+            <WorkspacesPage
+              key={`${workspaceID || "list"}:${workspaceRevision}`}
+              apps={allApps}
+              workspaceID={workspaceID}
+              onSelect={selectWorkspace}
+              onOpenService={(id, host) => openDetail(id, "Overview", host)}
+              onOpenConfig={() => nav("config")}
+              onDirtyChange={setEditorDirty}
+              onSaved={() => {
+                void refresh();
+                void refreshHosts();
+              }}
+            />
+          )}
           {page === "config" && (
             <ConfigPage
               cfg={cfg}
@@ -1458,6 +1591,11 @@ export function AppShell() {
                 <Detail
                   key={identity(current)}
                   app={current}
+                  workspaceReadOnly={
+                    page === "workspaces" && !workspaceDetailAllowed
+                  }
+                  uses={usesFor(current)}
+                  onWorkspace={selectWorkspace}
                   localControls={scope === "local"}
                   onEdit={() => {
                     nav("dashboard", true);
@@ -1876,6 +2014,9 @@ function Detail({
   run: dispatch,
   busy,
   confirm,
+  uses,
+  onWorkspace,
+  workspaceReadOnly,
 }: {
   app: App;
   localControls: boolean;
@@ -1886,11 +2027,14 @@ function Detail({
   run: Action;
   busy: boolean;
   confirm: (f: () => void) => void;
+  uses: WorkspaceUse[];
+  onWorkspace: (id: string) => void;
+  workspaceReadOnly: boolean;
 }) {
   const remote = !!a.host && a.host.id !== "local";
   const run: Action = (id, action) =>
     dispatch(id, action, false, a.host?.id || "local");
-  const blocked = !canControlApp(a);
+  const blocked = !canControlApp(a) || workspaceReadOnly;
   const active = isActive(a.runtime.state);
   const config = active ? a.effective_config || a.config : a.config;
   const connections = serviceConnections(
@@ -1901,6 +2045,29 @@ function Detail({
   const canStop = canStopApp(a);
   return (
     <>
+      {uses.length > 0 && (
+        <div className="workspace-uses">
+          <span>
+            Used by {new Set(uses.map((u) => u.id)).size} workspaces on this
+            controller:
+          </span>
+          {uses.map((u) => (
+            <button
+              className="button small"
+              key={`${u.id}:${u.service}`}
+              onClick={() => onWorkspace(u.id)}
+            >
+              {u.name} ({u.required ? "required" : "optional"})
+            </button>
+          ))}
+        </div>
+      )}
+      {workspaceReadOnly && (
+        <p className="workspace-explanation">
+          Service controls are unavailable until a fresh workspace observation
+          is available. You can still inspect service evidence.
+        </p>
+      )}
       <div className="detail-status">
         <StatusIndicator status={a.runtime.state} plain />
         {!isLiveApp(a) && (

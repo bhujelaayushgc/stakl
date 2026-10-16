@@ -17,6 +17,7 @@ import (
 	"github.com/bhujelaayushgc/stakl/internal/peeraccess"
 	"github.com/bhujelaayushgc/stakl/internal/storage"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
+	"github.com/bhujelaayushgc/stakl/internal/workspaces"
 	"github.com/bhujelaayushgc/stakl/web"
 	"io"
 	"log"
@@ -87,6 +88,7 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
   start|stop --all [--yes]          Operate on included apps
   logs APP [--follow]              Read captured logs
   profile start|stop|restart ID     Operate on a profile
+  workspace list | status ID       Read project requirements and readiness
   config validate|path|reload       Manage YAML configuration
   init | open | backup             Setup, dashboard, backup
   tls init --host HOST             Create HTTPS certificate and key
@@ -244,8 +246,11 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	s.PeerAccess = peeraccess.New(filepath.Join(dir, "peer-access.json"), s.PeerHandler)
 	defer s.PeerAccess.Close()
 	hostRegistry.Start(serverCtx)
+	handler := s.Handler()
+	s.Workspaces.Start(serverCtx, m.Bus)
+	defer s.Workspaces.Close()
 	server := &http.Server{
-		Handler:           s.Handler(),
+		Handler:           handler,
 		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -285,6 +290,7 @@ Usage: stakl [--config PATH] [--port PORT] [--no-browser]
 	serverCancel()
 	s.CancelPeerStreams()
 	hostRegistry.Close()
+	s.Workspaces.Close()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if e := server.Shutdown(shutdownCtx); e != nil {
 		_ = server.Close()
@@ -324,6 +330,14 @@ func cli(i instance, args []string) error {
 	method := "GET"
 	path := ""
 	switch args[0] {
+	case "workspace":
+		if len(args) == 2 && args[1] == "list" {
+			path = "/api/workspaces"
+		} else if len(args) == 3 && args[1] == "status" && config.ValidID(args[2]) {
+			path = "/api/workspaces/" + args[2]
+		} else {
+			return fmt.Errorf("usage: stakl workspace list | status ID")
+		}
 	case "status", "list":
 		path = "/api/apps"
 	case "start", "stop", "restart":
@@ -403,6 +417,35 @@ func cli(i instance, args []string) error {
 		}
 		_, e = io.Copy(os.Stdout, r.Body)
 		return e
+	}
+	if args[0] == "workspace" {
+		if args[1] == "list" {
+			var views []workspaces.View
+			if e = json.NewDecoder(r.Body).Decode(&views); e != nil {
+				return e
+			}
+			fmt.Printf("%-24s %-12s %-10s %s\n", "WORKSPACE", "READINESS", "ISSUES", "NAME")
+			for _, v := range views {
+				fmt.Printf("%-24s %-12s %-10d %s\n", v.ID, v.State, v.RequiredIssues+v.OptionalIssues, v.Name)
+			}
+		} else {
+			var v workspaces.View
+			if e = json.NewDecoder(r.Body).Decode(&v); e != nil {
+				return e
+			}
+			fmt.Printf("%s: %s\nChecks run on the workspace controller. Readiness covers configured requirements.\n", v.Name, v.State)
+			for _, m := range v.Members {
+				requirement := "optional"
+				if m.Required {
+					requirement = "required"
+				}
+				fmt.Printf("  %s (%s, %s): %s - %s\n", m.Alias, requirement, m.Condition, m.State, m.Reason)
+				for _, p := range m.Checks {
+					fmt.Printf("    %s: %s - %s\n", p.Name, p.State, p.Reason)
+				}
+			}
+		}
+		return nil
 	}
 	if args[0] == "status" || args[0] == "list" {
 		var apps []manager.AppView

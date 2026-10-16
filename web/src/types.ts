@@ -45,6 +45,8 @@ export interface Runtime {
   next_restart?: string;
 }
 export interface App {
+  observed_at?: string;
+  health_observation?: { time: string; ok: boolean };
   host?: HostDescription;
   config: AppConfig;
   effective_config?: AppConfig;
@@ -152,6 +154,16 @@ export interface Config {
   error: string;
   groups: Record<string, { name: string; order: number }>;
   profiles: Record<string, Profile>;
+  workspaces?: Record<
+    string,
+    {
+      name: string;
+      services: Record<
+        string,
+        { controller: string; app: string; required?: boolean }
+      >;
+    }
+  >;
   raw?: string;
   revision?: string;
 }
@@ -189,6 +201,13 @@ export const canStopApp = (app: App) =>
     (app.config.type === "custom" && !!app.config.stop?.command));
 export const label = (s: string) =>
   ({
+    ready: "Ready",
+    blocked: "Blocked",
+    degraded: "Degraded",
+    started: "Started",
+    already_running: "Already running",
+    skipped: "Skipped",
+    outcome_unknown: "Outcome unknown",
     active: "All running",
     attention: "Needs attention",
     external: "Running externally",

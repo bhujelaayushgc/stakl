@@ -71,7 +71,7 @@ test("connected hosts isolate equal IDs, permissions, routes, logs and responsiv
       remote.getByRole("button", { name: "Stop Heartbeat service" }),
     ).toBeDisabled();
     await expect(
-      page.getByRole("button", { name: "Workspace actions" }),
+      page.getByRole("button", { name: "Application actions" }),
     ).toHaveCount(0);
     await remote
       .getByRole("button", { name: "Heartbeat service", exact: true })

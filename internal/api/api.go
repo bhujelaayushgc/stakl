@@ -13,6 +13,7 @@ import (
 	"github.com/bhujelaayushgc/stakl/internal/peeraccess"
 	"github.com/bhujelaayushgc/stakl/internal/runner"
 	"github.com/bhujelaayushgc/stakl/internal/supervisor"
+	"github.com/bhujelaayushgc/stakl/internal/workspaces"
 	"io"
 	"io/fs"
 	"log"
@@ -31,6 +32,7 @@ import (
 
 type Server struct {
 	Manager                 *manager.Manager
+	Workspaces              *workspaces.Engine
 	Hosts                   *hosts.Registry
 	PeerAccess              *peeraccess.Controller
 	Token, Address, Version string
@@ -41,6 +43,9 @@ type Server struct {
 	saveMu                  sync.Mutex
 	ControllerID            string
 	controllerOnce          sync.Once
+	workspaceOnce           sync.Once
+	workspaceActionMu       sync.Mutex
+	workspaceActions        map[string]bool
 	controllerErr           error
 	peerMu                  sync.Mutex
 	peerStreams             map[string]map[*peerStream]struct{}
@@ -68,10 +73,16 @@ func (s *Server) initController() {
 }
 func (s *Server) Handler() http.Handler {
 	s.initController()
+	s.workspaceOnce.Do(func() {
+		if s.Workspaces == nil {
+			s.Workspaces = workspaces.New(s.Manager.Config, s.hostSnapshots)
+		}
+	})
 	mux := http.NewServeMux()
 	s.peerRoutes(mux)
 	s.hostRoutes(mux)
 	s.peerAccessRoutes(mux)
+	s.workspaceRoutes(mux)
 	mux.HandleFunc("GET /api/apps", func(w http.ResponseWriter, r *http.Request) { JSON(w, s.Manager.Views()) })
 	mux.HandleFunc("GET /api/apps/{id}", s.app)
 	mux.HandleFunc("POST /api/apps/{id}/{action}", s.action)
@@ -234,7 +245,7 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	c := s.Manager.Config()
-	response := map[string]any{"path": s.Manager.ConfigPath, "error": s.Manager.Error(), "groups": c.Groups, "profiles": c.Profiles, "logging": c.Logging}
+	response := map[string]any{"path": s.Manager.ConfigPath, "error": s.Manager.Error(), "groups": c.Groups, "profiles": c.Profiles, "logging": c.Logging, "workspaces": c.Workspaces}
 	if r.URL.Query().Get("raw") == "true" {
 		b, e := os.ReadFile(s.Manager.ConfigPath)
 		if e != nil {

@@ -88,7 +88,7 @@ test("desktop controls, live logs, keyboard palette and editor safety", async ({
   await page.getByLabel("Color theme").selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(
-    page.getByRole("button", { name: "Workspace actions" }),
+    page.getByRole("button", { name: "Application actions" }),
   ).toHaveCSS("background-color", "rgb(23, 32, 29)");
   await page.screenshot({
     path: testInfo.outputPath("desktop-dark.png"),
@@ -164,7 +164,7 @@ test("mobile navigation, responsive rows and detail controls", async ({
     page.getByRole("button", { name: "Toggle navigation" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Workspace actions" }),
+    page.getByRole("button", { name: "Application actions" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "More actions for Heartbeat service" }),

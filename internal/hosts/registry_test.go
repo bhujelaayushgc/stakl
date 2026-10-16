@@ -57,6 +57,31 @@ func registryRegister(t *testing.T, r *Registry, s *httptest.Server) Description
 }
 
 // Detects saving unverified/duplicate identities or serializing credentials and live caches.
+func TestWorkspaceMutationRejectsDifferentControllerIdentity(t *testing.T) {
+	store := registryStore(t)
+	r, err := NewRegistry(store, "local-controller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var posts atomic.Int32
+	s := registryPeer(t, "controller-a", func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == "POST" {
+			posts.Add(1)
+			json.NewEncoder(w).Encode(LifecycleResponse{Info: Info{ControllerID: "controller-a", Protocol: 1, Access: "control"}, Results: map[string]string{"web": "ok"}})
+		} else {
+			json.NewEncoder(w).Encode(Snapshot{Info: Info{ControllerID: "controller-a", Protocol: 1, Access: "control"}})
+		}
+	})
+	host := registryRegister(t, r, s)
+	if _, err := r.OperateController(context.Background(), host.ID, "controller-b", "web", "start"); err == nil {
+		t.Fatal("workspace action ignored stable controller identity")
+	}
+	if posts.Load() != 0 {
+		t.Fatal("mismatched controller received a mutation")
+	}
+}
+
 func TestRegistrationIdentityAndPersistence(t *testing.T) {
 	store := registryStore(t)
 	r, err := NewRegistry(store, "local")

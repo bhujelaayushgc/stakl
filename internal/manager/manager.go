@@ -20,12 +20,18 @@ import (
 	"time"
 )
 
+type HealthObservation struct {
+	Time time.Time `json:"time"`
+	OK   bool      `json:"ok"`
+}
 type AppView struct {
-	EffectiveConfig config.App         `json:"effective_config"`
-	Config          config.App         `json:"config"`
-	Runtime         runner.Runtime     `json:"runtime"`
-	Containers      []runner.Container `json:"containers"`
-	Ports           map[int]bool       `json:"ports"`
+	ObservedAt        time.Time          `json:"observed_at"`
+	HealthObservation *HealthObservation `json:"health_observation,omitempty"`
+	EffectiveConfig   config.App         `json:"effective_config"`
+	Config            config.App         `json:"config"`
+	Runtime           runner.Runtime     `json:"runtime"`
+	Containers        []runner.Container `json:"containers"`
+	Ports             map[int]bool       `json:"ports"`
 }
 type tracked struct {
 	Runtime             runner.Runtime
@@ -33,6 +39,8 @@ type tracked struct {
 	Containers          []runner.Container
 	Ports               map[int]bool
 	LastCheck           time.Time
+	ObservedAt          time.Time
+	HealthObservation   *HealthObservation
 	Failures, Successes int
 	LogLaunch           string
 	RecoveryError       string
@@ -193,7 +201,12 @@ func (m *Manager) Views() []AppView {
 		for p, open := range t.Ports {
 			ports[p] = open
 		}
-		out = append(out, AppView{Config: config.Redacted(a), EffectiveConfig: config.Redacted(t.Effective), Runtime: t.Runtime, Containers: append([]runner.Container{}, t.Containers...), Ports: ports})
+		var observation *HealthObservation
+		if t.HealthObservation != nil {
+			copy := *t.HealthObservation
+			observation = &copy
+		}
+		out = append(out, AppView{ObservedAt: t.ObservedAt, HealthObservation: observation, Config: config.Redacted(a), EffectiveConfig: config.Redacted(t.Effective), Runtime: t.Runtime, Containers: append([]runner.Container{}, t.Containers...), Ports: ports})
 	}
 	return out
 }
@@ -369,6 +382,15 @@ func (m *Manager) refresh(id string) {
 	oldState := t.Runtime.State
 	detailsChanged := !reflect.DeepEqual(t.Containers, st.Containers) || !reflect.DeepEqual(t.Ports, ports)
 	t.LastCheck = time.Now()
+	if e == nil {
+		t.ObservedAt = t.LastCheck.UTC()
+	} else {
+		t.ObservedAt = time.Time{}
+	}
+	t.HealthObservation = nil
+	if h != nil && e == nil {
+		t.HealthObservation = &HealthObservation{Time: h.Time, OK: h.OK}
+	}
 	t.Containers = st.Containers
 	t.Ports = ports
 	t.Runtime.State = newState
@@ -527,8 +549,50 @@ func RestartDelay(p config.Restart, attempt int) time.Duration {
 	return d
 }
 func (m *Manager) Operate(ctx context.Context, action string, ids []string, force bool) map[string]string {
+	return m.OperateDetailed(ctx, action, ids, force).Results
+}
+
+type OperationResult struct {
+	Results        map[string]string
+	OutcomeUnknown bool
+}
+
+type uncertainOutcomeError struct{ cause error }
+
+func (e *uncertainOutcomeError) Error() string { return e.cause.Error() }
+func (e *uncertainOutcomeError) Unwrap() error { return e.cause }
+
+func (m *Manager) OperateDetailed(ctx context.Context, action string, ids []string, force bool) OperationResult {
 	m.op.Lock()
 	defer m.op.Unlock()
+	return m.operateDetailedLocked(ctx, action, ids, force)
+}
+
+// OperateWithConfig keeps workspace membership bound to the config generation
+// checked by its caller, including while waiting for another lifecycle action.
+func (m *Manager) OperateWithConfig(ctx context.Context, action string, ids []string, force bool, expected *config.Config) (OperationResult, error) {
+	m.op.Lock()
+	defer m.op.Unlock()
+	if m.Config() != expected {
+		return OperationResult{}, fmt.Errorf("configuration changed; refresh before operating")
+	}
+	return m.operateDetailedLocked(ctx, action, ids, force), nil
+}
+
+func (m *Manager) operateDetailedLocked(ctx context.Context, action string, ids []string, force bool) OperationResult {
+	unknown := false
+	results := m.operateLocked(ctx, action, ids, force, &unknown)
+	m.mu.RLock()
+	for id, result := range results {
+		if app := m.apps[id]; result != "ok" && app != nil && app.Runtime.State == "unknown" && app.Runtime.Launch != "" {
+			unknown = true
+		}
+	}
+	m.mu.RUnlock()
+	return OperationResult{Results: results, OutcomeUnknown: unknown}
+}
+
+func (m *Manager) operateLocked(ctx context.Context, action string, ids []string, force bool, uncertain *bool) map[string]string {
 	if e := ctx.Err(); e != nil {
 		return map[string]string{"error": e.Error()}
 	}
@@ -629,6 +693,9 @@ func (m *Manager) Operate(ctx context.Context, action string, ids []string, forc
 			continue
 		}
 		if e := m.startOne(ctx, id, false); e != nil {
+			if _, ok := e.(*uncertainOutcomeError); ok {
+				*uncertain = true
+			}
 			out[id] = e.Error()
 		} else {
 			out[id] = "ok"
@@ -684,6 +751,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 	cancel()
 	if st.Running {
 		m.mu.Lock()
+		t.ObservedAt, t.HealthObservation = time.Time{}, nil
 		t.Runtime.State = "external"
 		t.Runtime.Owned = r.Owned || st.State.ID != ""
 		if t.Runtime.Owned {
@@ -700,6 +768,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 		h := health.Check(ctx, a.Detect, a, r, nil)
 		if h.OK {
 			m.mu.Lock()
+			t.ObservedAt, t.HealthObservation = time.Time{}, nil
 			t.Runtime.State = "external"
 			t.Runtime.Owned = false
 			m.save(id, t)
@@ -715,6 +784,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 	}
 	m.mu.Lock()
 	t.Runtime.State = "starting"
+	t.ObservedAt, t.HealthObservation = time.Time{}, nil
 	t.Runtime.Error = ""
 	t.Runtime.NextRestart = nil
 	t.Effective = a
@@ -737,6 +807,7 @@ func (m *Manager) startOne(ctx context.Context, id string, retry bool) error {
 			t.Runtime.Launch = newRuntime.Launch
 			t.Runtime.Started = newRuntime.Started
 			t.Runtime.State = "unknown"
+			e = &uncertainOutcomeError{cause: e}
 		}
 	} else {
 		newRuntime.RestartCount = count
@@ -781,6 +852,7 @@ func (m *Manager) stopOne(ctx context.Context, id string, force bool) error {
 		return nil
 	}
 	t.Runtime.State = "stopping"
+	t.ObservedAt, t.HealthObservation = time.Time{}, nil
 	m.mu.Unlock()
 	m.event("app.stopping", id, a.Name+" is stopping")
 	stopCtx, cancel := context.WithTimeout(ctx, a.Stop.Timeout.Value()+15*time.Second)
@@ -956,6 +1028,9 @@ func (m *Manager) Reload() error {
 					t.Failures, t.Successes = 0, 0
 					t.Containers = nil
 					t.Ports = map[int]bool{}
+				}
+				if !reflect.DeepEqual(t.Effective, a) {
+					t.ObservedAt, t.HealthObservation = time.Time{}, nil
 				}
 				t.Effective = a
 				t.LastCheck = time.Time{}
