@@ -3,7 +3,7 @@ module github.com/bhujelaayushgc/stakl
 go 1.26.9
 
 require (
-	github.com/mattn/go-shellwords v1.0.15
+	github.com/mattn/go-shellwords v1.0.16
 	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.59.0
